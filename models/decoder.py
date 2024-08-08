@@ -27,7 +27,8 @@ class Decoder(nn.Module):
 
         self.num_item = num_item
         self.max_degree = max_degree
-
+        
+        # item embedding vector 생성
         self.input_embed = ItemNodeEncoder(
             num_nodes = self.num_item,
             max_degree = self.max_degree,

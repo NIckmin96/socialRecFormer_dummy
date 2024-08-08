@@ -55,14 +55,17 @@ def mat_to_csv(data_path:str):
 
         # drop unused columns (TODO: Maybe used later)
         rating_df.drop(['category_id', 'helpfulness', 'timestamp'], axis=1, inplace=True)
-    
+        
+    # rating_df : user-item interaction data
+    # trust_df : user간의 Social interaction을 나타내는 데이터
     trust_file = loadmat(data_path + '/' + 'trustnetwork.mat')
     trust_file = trust_file['trustnetwork'].astype(np.int64)    
     trust_df = pd.DataFrame(trust_file, columns=['user_id_1', 'user_id_2'])
 
     ### data filtering & id-rearrange ###
+    # 1. trust_df(socical interaction) & rating_df(user-item interaction) 공통되는 user만 사용
+    # 2. Re-index : user_id를 1부터 순차적으로 rearrange
     rating_df, trust_df = reset_and_filter_data(rating_df, trust_df)
-    ### data filtering & id-rearrange ###
 
     # 전체 user-item rating 정보를 담은 rating matrix 생성
     rating_matrix = sparse.lil_matrix((max(rating_df['user_id'].unique())+1, max(rating_df['product_id'].unique())+1), dtype=np.uint16)
@@ -137,20 +140,12 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
         # Ciao: 7375 user (user-item) ==> 7317 user (social)
         # Epinions: 22164 user (user-item) ==> 18098 user (social)
     rating_df = rating_df[~rating_df['user_id'].isin(non_users.tolist())].copy()
-
-    # Generate user id mapping table
-    mapping_table_user = {}
-    new_id_user = 1
-    for item in social_ids:
-        mapping_table_user[item] = new_id_user
-        new_id_user += 1
     
+    # Generate user id mapping table
+    mapping_table_user = {user_id:idx+1 for idx,user_id in enumerate(social_ids)}
     # Generate item id mapping table
-    mapping_table_item = {}
-    new_id_item = 1
-    for item in rating_df['product_id'].unique().tolist():
-        mapping_table_item[item] = new_id_item
-        new_id_item += 1
+    mapping_table_item = {item_id:idx+1 for idx,item_id in enumerate(rating_df['product_id'].unique())}    
+    
     # print("before replace")
     # Replace user id & item id, using id mapping table.
     # print(rating_df.head())
@@ -176,8 +171,8 @@ def generate_social_dataset(data_path:str, save_flag:bool = False, seed:int = 42
         seed: random seed, used in dataset split
     """
     rating_dataframe = pd.read_csv(f'{data_path}/rating_{split}_seed_{seed}.csv' , index_col=[])
-    users = set(pd.unique(rating_dataframe['user_id']))
-    trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[])
+    users = rating_dataframe['user_id'].unique()
+    trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
     social_graph = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
     if save_flag:
         social_graph.to_csv(data_path + f'/trustnetwork_{split}_seed_{seed}.csv')
@@ -336,7 +331,8 @@ def generate_social_random_walk_sequence(data_path:str, num_nodes:int=10, walk_l
     dataframe = pd.read_csv(trust_file, index_col=0)
     social_graph = nx.from_pandas_edgelist(dataframe, source='user_id_1', target='user_id_2')
     degree_table = generate_user_degree_table(data_path=data_path, split=split, seed=data_split_seed)
-
+    user_degree_dic = dict(zip(degree_table.user_id, degree_table.degree)) # for revised code(hashing)
+    anchor_seq_degree = []
     all_path_list = []
 
     if all_node:
@@ -364,8 +360,9 @@ def generate_social_random_walk_sequence(data_path:str, num_nodes:int=10, walk_l
     
     # At first, there is no previous node, so set it to None.
     for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
-        path_dict = {}
-        path_dict[nodes] = [nodes]
+        seqs = [nodes]
+        # path_dict = {}
+        # path_dict[nodes] = [nodes]
         # for _ in range(walk_length - 1):
         wl = 0
         threshold = 0
@@ -373,68 +370,81 @@ def generate_social_random_walk_sequence(data_path:str, num_nodes:int=10, walk_l
             # Move to one of connected node randomly.
             if wl == 0:
                 next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
-                path_dict[nodes].append(next_node)
+                seqs.append(next_node)
+                # path_dict[nodes].append(next_node)
                 wl += 1
 
             # If selected node was "edge node", there is no movable nodes, so pad it with 0(zero-padding).
-            elif path_dict[nodes][-1] == 0:
-                path_dict[nodes].append(0)
+            elif seqs[-1]==0:
+            # elif path_dict[nodes][-1] == 0:
+                seqs.append(0)
+                # path_dict[nodes].append(0)
                 wl += 1
 
             # Move to one of connected node randomly.
             else:
-                next_node = find_next_node(social_graph, previous_node=path_dict[nodes][-2], current_node=path_dict[nodes][-1], RETURN_PARAMS=return_params/10)
-                if next_node in path_dict[nodes]:
+                next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+                # next_node = find_next_node(social_graph, previous_node=path_dict[nodes][-2], current_node=path_dict[nodes][-1], RETURN_PARAMS=return_params/10)
+                if next_node in seqs:
+                # if next_node in path_dict[nodes]:
                     #print(next_node)
                     threshold += 1
                     if threshold > 10:
-                        path_dict[nodes].append(0)
+                        seqs.append(0)
+                        # path_dict[nodes].append(0)
                         wl += 1
                     else:
                         continue
                 else:
-                    path_dict[nodes].append(next_node)
+                    seqs.append(next_node)
+                    # path_dict[nodes].append(next_node)
                     wl += 1
         
-        # # Get each user's degree information from degree table.
-        degree_list = []
-        for node_list in path_dict.values():
-            for node in node_list:
-                if node != 0:
-                    degree = degree_table['degree'].loc[degree_table['user_id'] == node].values[0]
-                else:
-                    # If node is 0 (zero-padded value), returns 0.
-                    degree = 0
-                degree_list.append(degree)
+        # revised
+        degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
+        anchor_seq_degree.append([nodes,seqs,degrees])
         
-        # Add degree information to path_dict.
-        path_dict = {key: [value, degree_list] for key, value in path_dict.items()}
-        all_path_list.append(path_dict)
+        # original
+        # # # Get each user's degree information from degree table.
+        # degree_list = []
+        # for node_list in path_dict.values():
+        #     for node in node_list:
+        #         if node != 0:
+        #             degree = degree_table['degree'].loc[degree_table['user_id'] == node].values[0]
+        #         else:
+        #             # If node is 0 (zero-padded value), returns 0.
+        #             degree = 0
+        #         degree_list.append(degree)
+        
+        # # Add degree information to path_dict.
+        # path_dict = {key: [value, degree_list] for key, value in path_dict.items()}
+        # all_path_list.append(path_dict)
 
-        
-        
     if save_flag:
         # save result to .csv
         path = data_path + '/' + f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv"
+        
+        # revised
+        result_df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
 
-        keys, walks, degrees = [], [], []
-        for paths in all_path_list:
-            for key, value in paths.items():
-                keys.append(key)
-                walks.append(value[0])
-                degrees.append(value[1])
+        # original
+        # keys, walks, degrees = [], [], []
+        # for paths in all_path_list:
+        #     for key, value in paths.items():
+        #         keys.append(key)
+        #         walks.append(value[0])
+        #         degrees.append(value[1])
 
-        result_df = pd.DataFrame({
-            'user_id':keys,
-            'random_walk_seq':walks,
-            'degree':degrees
-        })
+        # result_df = pd.DataFrame({
+        #     'user_id':keys,
+        #     'random_walk_seq':walks,
+        #     'degree':degrees
+        # })
         result_df.sort_values(by=['user_id'], inplace=True)
         result_df.reset_index(drop=True, inplace=True)
-        
         result_df.to_csv(path, index=False)
         
-    return all_path_list
+    # return all_path_list
 
 
 def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
