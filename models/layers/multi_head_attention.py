@@ -58,7 +58,7 @@ class ScaledDotProductAttention(nn.Module):
                 # score += attn_bias  # encoder self-attention 연산 시엔 add -> bias term 추가     
                 #score += self.spd_param
                 #print(self.spd_param.dtype)
-                attn_bias = torch.where(attn_bias == 0, 1, 1/(attn_bias)**2)
+                attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double())
                 loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length)
                 #print(loss)
                 #loss = 0
