@@ -24,40 +24,33 @@ from sklearn.utils import shuffle
 import torch
 from scipy import sparse
 
-# arg(or else) passing to DATASET later
-# DATASET = 'ciao'
-
-# data_path = os.getcwd() + '/dataset/' + DATASET
-
+# 최초 한번만 실행
 def mat_to_csv(data_path:str):
-    """
-    Convert .mat file into .csv file for using pandas.
-        Ciao: rating.mat, trustnetwork.mat
-        Epinions: rating.mat, trustnetwork.mat
-    
-    Args:
-        data_path: Path to .mat file
-    """
+    # rating_df : user-item interaction data
+    # trust_df : user간의 Social interaction을 나타내는 데이터
+    rating_path = os.path.join(data_path,'rating.csv')
+    trust_path = os.path.join(data_path,'trustnetwork.csv')
+    if os.path.isfile(rating_path) & os.path.isfile(trust_path):
+        rating_df = pd.read_csv(rating_path)
+        trust_df = pd.read_csv(trust_path)
+        return rating_df, trust_df
     dataset_name = data_path.split('/')[-1]
 
-    # load .mat file & convert to dataframe
-    if dataset_name == 'ciao':
+    # rating_df
+    if dataset_name=='ciao':
         rating_file = loadmat(data_path + '/' + 'rating.mat')
         rating_file = rating_file['rating'].astype(np.int64)
         rating_df = pd.DataFrame(rating_file, columns=['user_id', 'product_id', 'category_id', 'rating', 'helpfulness'])
-
         # drop unused columns (TODO: Maybe used later)
         rating_df.drop(['category_id', 'helpfulness'], axis=1, inplace=True)
     elif dataset_name == 'epinions':
         rating_file = loadmat(data_path + '/' + 'rating_with_timestamp.mat')
         rating_file = rating_file['rating_with_timestamp'].astype(np.int64)
         rating_df = pd.DataFrame(rating_file, columns=['user_id', 'product_id', 'category_id', 'rating', 'helpfulness', 'timestamp'])
-
         # drop unused columns (TODO: Maybe used later)
         rating_df.drop(['category_id', 'helpfulness', 'timestamp'], axis=1, inplace=True)
-        
-    # rating_df : user-item interaction data
-    # trust_df : user간의 Social interaction을 나타내는 데이터
+
+    # trust_df        
     trust_file = loadmat(data_path + '/' + 'trustnetwork.mat')
     trust_file = trust_file['trustnetwork'].astype(np.int64)    
     trust_df = pd.DataFrame(trust_file, columns=['user_id_1', 'user_id_2'])
@@ -75,43 +68,13 @@ def mat_to_csv(data_path:str):
     rating_matrix = rating_matrix.toarray()
     np.save(data_path + '/rating_matrix.npy', rating_matrix)
 
-
     # 저장되는 .csv 파일은 user filter & id re-arrange가 완료된 .csv 파일
     # 따라서 이 함수가 한번 실행된 이후로는 사용 X.
     rating_df.to_csv(data_path + '/rating.csv', index=False)
     trust_df.to_csv(data_path + '/trustnetwork.csv', index=False)
 
     print(".mat file converting finished...")
-
-def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42):
-    """
-    Split rating.csv file into train/valid/test.
-    
-    Args:
-        data_path: Path to dataset (ciao or epinions)
-        test: percentage of test & valid dataset (default: 10%)
-        seed: random seed (default=42)
-    """
-    if f'rating_train_seed_{seed}.csv' in os.listdir(data_path):
-        print(f"splitted data exists, seed: {seed} ")
-        return 0
-    
-    rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
-
-    ### train test split TODO: Change equation for split later on    
-    split_rating_df = shuffle(rating_df, random_state=seed)
-
-    num_test = int(len(split_rating_df) * test)
-    
-    rating_test_set = split_rating_df.iloc[:num_test]
-    rating_valid_set = split_rating_df.iloc[num_test:2 * num_test]
-    rating_train_set = split_rating_df.iloc[2 * num_test:]
-
-    rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
-    rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
-    rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
-
-    print(f"data split finished, seed: {seed}")
+    return rating_df, trust_df
 
 def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:
     """
@@ -145,103 +108,110 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
     mapping_table_user = {user_id:idx+1 for idx,user_id in enumerate(social_ids)}
     # Generate item id mapping table
     mapping_table_item = {item_id:idx+1 for idx,item_id in enumerate(rating_df['product_id'].unique())}    
-    
-    # print("before replace")
-    # Replace user id & item id, using id mapping table.
-    # print(rating_df.head())
-    # print(mapping_table_item)
-    # rating_df = rating_df.replace({'user_id': mapping_table_user, 'product_id':mapping_table_item})
-    # print("after rating")
-    # trust_df = trust_df.replace({'user_id_1': mapping_table_user, 'user_id_2': mapping_table_user})
-    # print("after repl")
 
     rating_df['user_id']= rating_df['user_id'].map(mapping_table_user)
     rating_df['product_id'] = rating_df['product_id'].map(mapping_table_item)
     trust_df['user_id_1']= trust_df['user_id_1'].map(mapping_table_user)
     trust_df['user_id_2'] = trust_df['user_id_2'].map(mapping_table_user)
+
     return rating_df, trust_df
 
-def generate_social_dataset(data_path:str, save_flag:bool = False, seed:int = 42, split:str='train'):
+def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42):
+    """
+    Split rating.csv file into train/valid/test.
+    
+    Args:
+        data_path: Path to dataset (ciao or epinions)
+        test: percentage of test & valid dataset (default: 10%)
+        seed: random seed (default=42)
+    """
+
+    for split in ['train','valid','test']:
+        split_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
+
+        # split 파일이 하나라도 없는 경우
+        if split_file not in os.listdir(data_path):
+            rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
+            ### train test split TODO: Change equation for split later on    
+            split_rating_df = shuffle(rating_df, random_state=seed)
+
+            num_test = int(len(split_rating_df) * test)
+            
+            rating_test_set = split_rating_df.iloc[:num_test]
+            rating_valid_set = split_rating_df.iloc[num_test:2 * num_test]
+            rating_train_set = split_rating_df.iloc[2 * num_test:]
+
+            rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
+            rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
+            rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
+
+            print(f"data split finished, seed: {seed}")
+            
+            return rating_train_set, rating_valid_set, rating_test_set
+
+        else:
+            globals()[f'rating_{split}_set'] = pd.read_csv(split_file)
+
+    return rating_train_set, rating_valid_set, rating_test_set
+
+def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, seed:int=42):
     """
     Generate social graph from train/test/validation dataset
-
-    Args:
-        data_path: path to dataset
-        rating_file: path to rating file
-        seed: random seed, used in dataset split
     """
-    rating_dataframe = pd.read_csv(f'{data_path}/rating_{split}_seed_{seed}.csv' , index_col=[])
-    users = rating_dataframe['user_id'].unique()
-    trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
-    social_graph = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
-    if save_flag:
-        social_graph.to_csv(data_path + f'/trustnetwork_{split}_seed_{seed}.csv')
-    return social_graph
+    split_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
+    if split_file not in os.listdir(data_path):
+        trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
+        users = rating_split['user_id'].unique()            
+        social_split = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
+        # save
+        social_split.to_csv(data_path + f'/trustnetwork_{split}_seed_{seed}.csv')    
+    else:
+        social_split = pd.read_csv(split_file)
+    
+    return social_split
 
-def generate_user_degree_table(data_path:str, split:str='train', seed:int=42) -> pd.DataFrame:
+def generate_user_degree_table(data_path:str, trust_split, split:str='train', seed:int=42) -> pd.DataFrame:
     """
     Generate & return degree table from social graph(trustnetwork).
-    """
-    # processed file check
-    # if 'degree_table_social.csv' in os.listdir(data_path):
-    #     print("Processed 'degree_table_social.csv' file already exists...")
-    #     degree_df = pd.read_csv(data_path + '/degree_table_social.csv', index_col=[])
-    #     return degree_df
 
     # user-user network
         # Ciao: 7317 users
         # Epinions: 18098 users
-    trust_file = data_path + f'/trustnetwork_{split}_seed_{seed}.csv'
-    # trust_file = data_path + f'/trustnetwork.csv'
-    dataframe = pd.read_csv(trust_file, index_col=[])
 
-    social_graph = nx.from_pandas_edgelist(dataframe, source='user_id_1', target='user_id_2')
-
-    degrees = {node: val for (node, val) in social_graph.degree()}
-    degree_df = pd.DataFrame(degrees.items(), columns=['user_id', 'degree'])
-
-    degree_df.sort_values(by='user_id', ascending=True, inplace=True)
-
-    degree_df.to_csv(data_path + f'/degree_table_social_{split}_seed_{seed}.csv', index=False)
-    # degree_df.to_csv(data_path + f'/degree_table_social.csv', index=False)
+    """
+    user_degree_dir = data_path + f'/degree_table_social_{split}_seed_{seed}.csv'
+    if os.path.isfile(user_degree_dir):
+        degree_df = pd.read_csv(user_degree_dir)
+    else:
+        social_graph = nx.from_pandas_edgelist(trust_split, source='user_id_1', target='user_id_2')
+        degrees = {node: val for (node, val) in social_graph.degree()}
+        degree_df = pd.DataFrame(degrees.items(), columns=['user_id', 'degree'])
+        degree_df.sort_values(by='user_id', ascending=True, inplace=True)
+        degree_df.to_csv(user_degree_dir, index=False)    
 
     return degree_df
 
 
-def generate_item_degree_table(data_path:str, split:str='train', seed:int=42) -> pd.DataFrame:
+def generate_item_degree_table(data_path:str, rating_split:pd.DataFrame, split:str, seed:int=42) -> pd.DataFrame:
     """
     Generate & return degree table from user-item graph(rating matrix).
+
+    Ciao: 7375 user // 105114 items ==> 7317 user // 104975 items (after filtered)
     """
-    # processed file check
-    # if 'degree_table_item.csv' in os.listdir(data_path):
-    #     print(f"Processed 'degree_table_item.csv' file already exists...")
-    #     degree_df = pd.read_csv(data_path + '/degree_table_item.csv', index_col=[])
-    #     return degree_df
-    
-    # user-item network
-        # Ciao: 7375 user // 105114 items ==> 7317 user // 104975 items (after filtered)
-    if split == "all":
-        rating_file = data_path + '/rating.csv'
+    item_degree_dir = data_path + f'/degree_table_item_{split}_seed_{seed}.csv'
+    if os.path.isfile(item_degree_dir):
+        degree_df = pd.read_csv(item_degree_dir)
     else:
-        rating_file = data_path + f'/rating_{split}_seed_{seed}.csv'
-    # rating_file = data_path + f'/rating.csv'
-    dataframe = pd.read_csv(rating_file, index_col=[])
+        # Since using NetworkX to compute bipartite graph's degree is time-consuming(because graph is too sparse),
+        # we just use pandas for simple degree calculation.
+        degree_df = rating_split.groupby('product_id')['user_id'].nunique().reset_index()
+        degree_df.columns = ['product_id', 'degree']
 
-    # Since using NetworkX to compute bipartite graph's degree is time-consuming(because graph is too sparse),
-    # we just use pandas for simple degree calculation.
-    degree_df = dataframe.groupby('product_id')['user_id'].nunique().reset_index()
-    # degree_df = dataframe.groupby('user_id')['product_id'].nunique().reset_index()
-
-    degree_df.columns = ['product_id', 'degree']
-    # degree_df.columns = ['user_id', 'degree']
-
-    degree_df.to_csv(data_path + f'/degree_table_item_{split}_seed_{seed}.csv', index=False)
-    # degree_df.to_csv(data_path + f'/degree_table_item.csv', index=False)
+        degree_df.to_csv(item_degree_dir, index=False)
 
     return degree_df
 
-
-def generate_interacted_items_table(data_path:str, split:str='train', seed:int=42) -> pd.DataFrame:
+def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, degree_table:pd.DataFrame, split:str, seed:int=42) -> pd.DataFrame:
     """
     Generate & return user's interacted items & ratings table from user-item graph(rating matrix)
 
@@ -250,63 +220,57 @@ def generate_interacted_items_table(data_path:str, split:str='train', seed:int=4
         item_length: number of interacted items to fetch
         seed: random seed, used in dataset split
     """
-    
-    if split == "all":
-        rating_file = data_path + '/rating.csv'
+    user_item_dir = data_path + f'/user_item_interaction_{split}_seed_{seed}.csv'
+    if os.path.isfile(user_item_dir):
+        user_item_dataframe = pd.read_csv(user_item_dir)
     else:
-        rating_file = data_path + f'/rating_{split}_seed_{seed}.csv'
-    
-    dataframe = pd.read_csv(rating_file, index_col=[])
-    degree_table = generate_item_degree_table(data_path=data_path, split=split, seed=seed)
-    degree_table = dict(zip(degree_table['product_id'], degree_table['degree']))    # for id mapping.
+        degree_table = dict(zip(degree_table['product_id'], degree_table['degree']))    # for id mapping.
 
-    user_item_dataframe = dataframe.groupby('user_id').agg({'product_id': list, 'rating': list}).reset_index()
-    user_item_dataframe['product_degree'] = user_item_dataframe['product_id'].apply(lambda x: [degree_table[id] for id in x])
+        user_item_dataframe = rating_split.groupby('user_id').agg({'product_id': list, 'rating': list}).reset_index()
+        user_item_dataframe['product_degree'] = user_item_dataframe['product_id'].apply(lambda x: [degree_table[id] for id in x])
 
-    # This is for indexing 0, where random walk sequence has padded with 0.
-        # minimum number of interacted item is 4(before dataset splitting), so pad it to 4.
-    empty_data = [0, [0 for _ in range(4)], [0 for _ in range(4)], [0 for _ in range(4)]]
-    user_item_dataframe.loc[-1] = empty_data
-    user_item_dataframe.index = user_item_dataframe.index + 1
-    user_item_dataframe.sort_index(inplace=True)
-    # user_item_dataframe.to_csv(data_path + '/user_item_interaction.csv', index=False)
-    user_item_dataframe.to_csv(data_path + f'/user_item_interaction_{split}_seed_{seed}.csv', index=False)
+        # This is for indexing 0, where random walk sequence has padded with 0.
+            # minimum number of interacted item is 4(before dataset splitting), so pad it to 4.
+        empty_data = [0, [0 for _ in range(4)], [0 for _ in range(4)], [0 for _ in range(4)]]
+        user_item_dataframe.loc[-1] = empty_data
+        user_item_dataframe.index = user_item_dataframe.index + 1
+        user_item_dataframe.sort_index(inplace=True)
+        # user_item_dataframe.to_csv(data_path + '/user_item_interaction.csv', index=False)
+        user_item_dataframe.to_csv(user_item_dir, index=False)
 
     return user_item_dataframe
     
 
-def generate_interacted_users_table(data_path:str, split:str='train', seed:int=42) -> pd.DataFrame:
-    """
-    Generate & return user's interacted items & ratings table from user-item graph(rating matrix)
+# def generate_interacted_users_table(data_path:str, split:str='train', seed:int=42) -> pd.DataFrame:
+#     """
+#     Generate & return user's interacted items & ratings table from user-item graph(rating matrix)
 
-    Args:
-        data_path: path to dataset
-        item_length: number of interacted items to fetch
-    """
+#     Args:
+#         data_path: path to dataset
+#         item_length: number of interacted items to fetch
+#     """
     
-    if split=='all':
-        rating_file = data_path + '/rating.csv'
-    else:
-        rating_file = data_path + f'/rating_{split}_seed_{seed}.csv'
+#     if split=='all':
+#         rating_file = data_path + '/rating.csv'
+#     else:
+#         rating_file = data_path + f'/rating_{split}_seed_{seed}.csv'
         
-    dataframe = pd.read_csv(rating_file, index_col=[])
+#     dataframe = pd.read_csv(rating_file, index_col=[])
 
-    user_item_dataframe = dataframe.groupby('product_id').agg({'user_id': list, 'rating': list}).reset_index()
+#     user_item_dataframe = dataframe.groupby('product_id').agg({'user_id': list, 'rating': list}).reset_index()
 
-    # This is for indexing 0, where random walk sequence has padded with 0.
-        # minimum number of interacted item is 4(before dataset splitting), so pad it to 4.
-    # empty_data = [0, [0 for _ in range(4)], [0 for _ in range(4)], [0 for _ in range(4)]]
-    # user_item_dataframe.loc[-1] = empty_data
-    # user_item_dataframe.index = user_item_dataframe.index + 1
-    user_item_dataframe.sort_index(inplace=True)
-    # user_item_dataframe.to_csv(data_path + '/user_item_interaction.csv', index=False)
-    user_item_dataframe.to_csv(data_path + f'/item_user_interaction_{split}.csv', index=False)
+#     # This is for indexing 0, where random walk sequence has padded with 0.
+#         # minimum number of interacted item is 4(before dataset splitting), so pad it to 4.
+#     # empty_data = [0, [0 for _ in range(4)], [0 for _ in range(4)], [0 for _ in range(4)]]
+#     # user_item_dataframe.loc[-1] = empty_data
+#     # user_item_dataframe.index = user_item_dataframe.index + 1
+#     user_item_dataframe.sort_index(inplace=True)
+#     # user_item_dataframe.to_csv(data_path + '/user_item_interaction.csv', index=False)
+#     user_item_dataframe.to_csv(data_path + f'/item_user_interaction_{split}.csv', index=False)
 
-    return user_item_dataframe
+#     return user_item_dataframe
 
-
-
-def generate_social_random_walk_sequence(data_path:str, num_nodes:int=10, walk_length:int=5, save_flag:bool=False, all_node:bool=False, data_split_seed:int=42, split:str='train', regenerate:bool=False, return_params:int=1, train_x:int=10) -> list:
+def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFrame, user_degree:pd.DataFrame, num_nodes:int=0, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10) -> list:
     """
     Generate random walk sequence from social graph(trustnetwork).
     Return:
@@ -327,48 +291,36 @@ def generate_social_random_walk_sequence(data_path:str, num_nodes:int=10, walk_l
         split: dataset split type (default=train)
         regenerate: to generate random walk sequence once again (default=False)
     """
-    trust_file = data_path + f'/trustnetwork_{split}_seed_{data_split_seed}.csv'
-    dataframe = pd.read_csv(trust_file, index_col=0)
-    social_graph = nx.from_pandas_edgelist(dataframe, source='user_id_1', target='user_id_2')
-    degree_table = generate_user_degree_table(data_path=data_path, split=split, seed=data_split_seed)
-    user_degree_dic = dict(zip(degree_table.user_id, degree_table.degree)) # for revised code(hashing)
-    anchor_seq_degree = []
-    all_path_list = []
-
-    if all_node:
+    social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
+    if not num_nodes:
         num_nodes = len(social_graph.nodes())
 
     if split=='train':
-        csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_x}times.csv"
+        csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv"
+        file_name = data_path + '/' + csv_name
+        if os.path.isfile(file_name):
+            df = pd.read_csv(file_name)
+            print(f"Generated {split} random walk already exists: {csv_name}")
+            return df
+        else:
+            anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
+            anchor_nodes = np.repeat(anchor_nodes,train_augs) ##generate multiple random sequence 
     else:
         csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv"
-    
-    # processed file check
-    # 랜덤워크 시퀀스는 이 함수를 호출할 때 마다 무작위로 생성됨.
-    # generate_inpute_sequence_data()는 이 함수에서 생성된 랜덤워크 시퀀스를 사용하므로
-    # 동일한 seed, user length에 item length만 다르다면 랜덤워크 시퀀스를 다시 생성하지 않도록 설정.
-    if regenerate:
-        if csv_name not in os.listdir(data_path):
-            print("No random walk found, proceed generating...")
+        file_name = data_path + '/' + csv_name
+        if os.path.isfile(file_name):
+            df = pd.read_csv(file_name)
+            print(f"Generated {split} random walk already exists: {csv_name}")
+            return df
         else:
-            print(f"Generated random walk already exists: {csv_name}")
-            return 0
-
-    # select target(anchor) nodes randomly. (without replacement)
-    # if split == "train":
-    #     anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes*2, replace=True)
-    # else:
-    anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
-    if split == "train":
-        # augment archor nodes for train data by 'train_x' times
-        anchor_nodes = np.repeat(anchor_nodes,train_x) ##generate multiple random sequence 
+            anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
+    
+    user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
+    anchor_seq_degree = []
     
     # At first, there is no previous node, so set it to None.
     for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
         seqs = [nodes]
-        # path_dict = {}
-        # path_dict[nodes] = [nodes]
-        # for _ in range(walk_length - 1):
         wl = 0
         threshold = 0
         while wl < walk_length-1:
@@ -376,80 +328,38 @@ def generate_social_random_walk_sequence(data_path:str, num_nodes:int=10, walk_l
             if wl == 0:
                 next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
                 seqs.append(next_node)
-                # path_dict[nodes].append(next_node)
                 wl += 1
 
             # If selected node was "edge node", there is no movable nodes, so pad it with 0(zero-padding).
             elif seqs[-1]==0:
-            # elif path_dict[nodes][-1] == 0:
                 seqs.append(0)
-                # path_dict[nodes].append(0)
                 wl += 1
 
             # Move to one of connected node randomly.
             else:
                 next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
-                # next_node = find_next_node(social_graph, previous_node=path_dict[nodes][-2], current_node=path_dict[nodes][-1], RETURN_PARAMS=return_params/10)
                 if next_node in seqs:
-                # if next_node in path_dict[nodes]:
-                    #print(next_node)
                     threshold += 1
                     if threshold > 10:
                         seqs.append(0)
-                        # path_dict[nodes].append(0)
                         wl += 1
                     else:
                         continue
                 else:
                     seqs.append(next_node)
-                    # path_dict[nodes].append(next_node)
                     wl += 1
         
         # revised
         degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
         anchor_seq_degree.append([nodes,seqs,degrees])
-        
-        # original
-        # # # Get each user's degree information from degree table.
-        # degree_list = []
-        # for node_list in path_dict.values():
-        #     for node in node_list:
-        #         if node != 0:
-        #             degree = degree_table['degree'].loc[degree_table['user_id'] == node].values[0]
-        #         else:
-        #             # If node is 0 (zero-padded value), returns 0.
-        #             degree = 0
-        #         degree_list.append(degree)
-        
-        # # Add degree information to path_dict.
-        # path_dict = {key: [value, degree_list] for key, value in path_dict.items()}
-        # all_path_list.append(path_dict)
 
-    if save_flag:
-        # save result to .csv
-        path = data_path + '/' + csv_name
-        
-        # revised
-        result_df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
-
-        # original
-        # keys, walks, degrees = [], [], []
-        # for paths in all_path_list:
-        #     for key, value in paths.items():
-        #         keys.append(key)
-        #         walks.append(value[0])
-        #         degrees.append(value[1])
-
-        # result_df = pd.DataFrame({
-        #     'user_id':keys,
-        #     'random_walk_seq':walks,
-        #     'degree':degrees
-        # })
-        result_df.sort_values(by=['user_id'], inplace=True)
-        result_df.reset_index(drop=True, inplace=True)
-        result_df.to_csv(path, index=False)
-        
-    # return all_path_list
+    # revised
+    result_df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
+    result_df.sort_values(by=['user_id'], inplace=True)
+    result_df.reset_index(drop=True, inplace=True)
+    result_df.to_csv(file_name, index=False)
+    
+    return result_df
 
 
 def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
@@ -482,7 +392,7 @@ def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
     )
     return selected_node
     
-def generate_input_sequence_data(data_path, seed:int, split:str='train', random_walk_len:int=30, item_seq_len:int=100, return_params:int=1):
+def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:str='train', random_walk_len:int=30, item_seq_len:int=100, return_params:int=1, train_augs:int=10):
 
     # if os.path.isfie(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"):
     #     print(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"+" file exists")
@@ -520,28 +430,49 @@ def generate_input_sequence_data(data_path, seed:int, split:str='train', random_
 
         return result_list, num_slices
 
-    ## FIXME: 작성한 함수를 호출하도록 추후 수정
-    ########### FIXME: (231018)
-    # f'_split_{split}_seed_{seed}.csv' 로 filtering 했는데, 이러면 sequence 길이가 10, 20, 30인게 모두 걸림.
-    # 현재 생성되는 rw sequence 등 앞선 전처리 과정은 전부 다르게 생성되고 있음. 동일 수치가 나오는 이유가 여기가 문제인것으로 파악됨.
-    files = os.listdir(data_path)
-    for file_name in files:
-        if 'social' in file_name and f'rw_length_{random_walk_len}_rp_{return_params}_split_{split}_seed_{seed}.csv' in file_name:
-            user_path = file_name
-    ###########
-    item_path = f'user_item_interaction_{split}_seed_{seed}.csv'
+    # for col in user_df.columns:
+    #     print(f"{col} :", type(user_df[col][0]))
+
+    # for col in item_df.columns:
+    #     print(f"{col} :", type(item_df[col][0]))
+
     spd_path = 'shortest_path_result.npy'
 
+    if split=='train':
+        final_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}_{train_augs}times.pkl"
+    else:
+        final_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}.pkl"
+
+    if os.path.isfile(final_path):
+        total_df = pd.read_pickle(final_path)
+        
+        return total_df
 
     # Load dataset & convert data type
-    user_df = pd.read_csv(data_path + '/' + user_path, index_col=[])
-    user_df['random_walk_seq'] = user_df.apply(lambda x: literal_eval(x['random_walk_seq']), axis=1)
-    user_df['degree'] = user_df.apply(lambda x: literal_eval(x['degree']), axis=1)
 
-    item_df = pd.read_csv(data_path + '/' + item_path, index_col=[])
-    item_df['product_id'] = item_df.apply(lambda x: literal_eval(x['product_id']), axis=1)
-    item_df['rating'] = item_df.apply(lambda x: literal_eval(x['rating']), axis=1)
-    item_df['product_degree'] = item_df.apply(lambda x: literal_eval(x['product_degree']), axis=1)
+    def str_to_list(x):
+        if type(x)==str:
+            return literal_eval(x)
+        else:
+            return x 
+    
+    # user_df['random_walk_seq'] = user_df.apply(lambda x: literal_eval(x['random_walk_seq']), axis=1)
+    user_df['random_walk_seq'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
+    # user_df['degree'] = user_df.apply(lambda x: literal_eval(x['degree']), axis=1)
+    user_df['degree'] = user_df.apply(lambda x: str_to_list(x['degree']), axis=1)
+
+    # item_df['product_id'] = item_df.apply(lambda x: literal_eval(x['product_id']), axis=1)
+    item_df['product_id'] = item_df.apply(lambda x: str_to_list(x['product_id']), axis=1)
+    # item_df['rating'] = item_df.apply(lambda x: literal_eval(x['rating']), axis=1)
+    item_df['rating'] = item_df.apply(lambda x: str_to_list(x['rating']), axis=1)
+    # item_df['product_degree'] = item_df.apply(lambda x: literal_eval(x['product_degree']), axis=1)
+    item_df['product_degree'] = item_df.apply(lambda x: str_to_list(x['product_degree']), axis=1)
+
+    # for col in user_df.columns:
+    #     print(f"{col} :", type(user_df[col][0]))
+
+    # for col in item_df.columns:
+    #     print(f"{col} :", type(item_df[col][0]))
 
     # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
     spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
@@ -617,9 +548,8 @@ def generate_input_sequence_data(data_path, seed:int, split:str='train', random_
         # if current_user == 100:
         #     break
 
-    with open(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}.pkl", "wb") as file:
+    with open(final_path, "wb") as file:
         pickle.dump(total_df, file)
-    #total_df.to_csv(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}.csv")
 
 def pad_list(input_list:list, slice_length:int):
         """

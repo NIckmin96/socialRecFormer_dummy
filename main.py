@@ -9,12 +9,14 @@ import time
 import itertools
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+import data_making_2 as dm
 from utils import redirect_stdout
 from config import Config
 from dataset import MyDataset
@@ -201,16 +203,15 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                 # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
                 # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
                 # 따라서 Masked MSELoss를 사용
-                # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산하게 된다.
+                
             # loss = criterion(outputs.float(), batch['item_rating'].float())
             
-            #######
+            #######dec_loss
             mask = (batch['item_rating'] != 0)
-
             squared_diff = (outputs - batch['item_rating'])**2 * mask
-
             org_loss = torch.sum(squared_diff) / torch.sum(mask)
-            ##########
+
+            ########## new_loss ?
             
             #mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
             #rmse = torch.sqrt(mse.mean())
@@ -372,19 +373,21 @@ def get_args():
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
     parser.add_argument("--mode", type = str, default="train",
                         help="train eval")
-    parser.add_argument("--dataset", type = str, default="epinions",
-                        help = "ciao, epinions")
     parser.add_argument("--checkpoint", type = str, default="test",
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--data_seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
-    parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
     parser.add_argument('--num_layers_enc', type=int, default=2, help="num enc layers")
     parser.add_argument('--num_layers_dec', type=int, default=2, help="num dec layers")
-    parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--lr', type=float, default=1e-4)
+    # dataset args
+    parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
+    parser.add_argument('--data_seed', type=int, default=42)
+    parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
+    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
+    parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
+    parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
+    parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
     
     args = parser.parse_args()
     return args
@@ -407,10 +410,10 @@ def main():
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
     if not os.path.exists(log_dir):
-        os.mkdir(log_dir)
+        os.makedirs(log_dir)
     log_dir = os.path.join(log_dir, args.dataset)
     if not os.path.exists(log_dir):
-        os.mkdir(log_dir)
+        os.makedirs(log_dir)
 
     # log_path = os.path.join(log_dir,'{}.{}.log'.format(args.mode, args.name))
     # redirect_stdout(open(log_path, 'w'))
@@ -434,13 +437,13 @@ def main():
     # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
     if not os.path.exists(checkpoint_data):
-        os.mkdir(checkpoint_data)
+        os.makedirs(checkpoint_data)
     checkpoint_dir = checkpoint_data + f'checkpoints_seed_{args.seed}/'
     if not os.path.exists(checkpoint_dir):
-        os.mkdir(checkpoint_dir)
+        os.makedirs(checkpoint_dir)
     checkpoint_dir = os.path.join(checkpoint_dir, "train")
     if not os.path.exists(checkpoint_dir):
-        os.mkdir(checkpoint_dir)
+        os.makedirs(checkpoint_dir)
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model')
     training_config["checkpoint_path"] = checkpoint_path
     """if os.path.exists(checkpoint_path):
@@ -462,14 +465,51 @@ def main():
 
     ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
         ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
-    train_ds = MyDataset(dataset=args.dataset, split='train', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params)
-    # dev_ds = MyDataset(dataset=args.dataset, split='valid', seed=args.seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len)
-    test_ds = MyDataset(dataset=args.dataset, split='test', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params)
+
+    '''
+    data_making_2.py에서는 한번에 train/valid/test를 만들고 있기 때문에, MyDataset 내에서 DatasetMaking 객체를 따로 불러오면 비효율적임
+    
+    1. 파일 있는지 확인(train/valid/test 전부)
+    2. 없으면 DatasetMaking 객체 생성
+    3. DatasetMaking 객체 내 train/valid/test -> dataset
+    '''
+    # 1. file check
+    train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
+    valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
+    test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
+    
+    if os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path):
+        total_train = pd.read_pickle(train_path)
+        total_valid = pd.read_pickle(valid_path)
+        total_test = pd.read_pickle(test_path)
+    
+    else:
+        print("Data file doesn't Exist!")
+        print("Creating Datatset...")
+        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs)
+        total_train = data_making.total_train
+        total_valid = data_making.total_valid
+        total_test = data_making.total_test
+        print("Dataset Created!")
+
+    train_ds = MyDataset(total_train)
+    valid_ds = MyDataset(total_valid)
+    test_ds = MyDataset(total_test)
+    
+
+    # train_ds = MyDataset(dataset=args.dataset, split='train', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params, train_augs=args.train_augs)
+    # test_ds = MyDataset(dataset=args.dataset, split='test', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params)
 
     ds_iter = {
-            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=8),
+            # "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=8),
+            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
             # "dev":DataLoader(dev_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
-            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=8)
+            # "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=8)
+            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4)
     }
 
     ### training preparation ###

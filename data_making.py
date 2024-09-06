@@ -17,8 +17,8 @@ def get_args():
     parser.add_argument("--first", type=bool, default=False, help="first preprocess to make filtered .csv files")
     parser.add_argument("--seed", type=int, default=42, help="random seed, used in dataset split")
     parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
-    parser.add_argument("--random_walk_len", type=int, default=50, help="random walk seqeunce length (encoder's input length)")
-    parser.add_argument("--item_seq_len", type=int, default=50, help="item list length (decoder's input length)")
+    parser.add_argument("--random_walk_len", type=int, default=30, help="random walk seqeunce length (encoder's input length)")
+    parser.add_argument("--item_seq_len", type=int, default=100, help="item list length (decoder's input length)")
     parser.add_argument("--return_params", type=int, default=1)
 
     args = parser.parse_args()
