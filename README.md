@@ -1,4 +1,5 @@
 # socialRecFormer_dummy
+Reference : https://github.com/Bokyeong1001/SocialRecFormer
 
 # Data Creation Process
 run 'data_making.py' with proper arguments

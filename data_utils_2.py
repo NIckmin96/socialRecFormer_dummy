@@ -481,6 +481,11 @@ def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:st
     # hash(dictionary)
     user_product_dic = dict(zip(item_df['user_id'], item_df['product_id']))
     user_product_degree_dic = dict(zip(item_df['user_id'], item_df['product_degree']))
+    product_degree_dic = dict(zip(item_df['product_id'], item_df['product_degree']))
+
+    # FIXME: user_id, user_seqeucne, user_degree, item_sequence, item_degree -> loop 돌지 않고 처리 가능
+    ## 
+
 
     for _, data in tqdm(user_df.iterrows(), total=user_df.shape[0]):
         current_user = data['user_id']
@@ -511,7 +516,7 @@ def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:st
 
         # 중복을 제거
         item_list_removed_duplicate = list(set(item_list))
-
+    
         # flat_item_list 원소와 대응되는 degree를 추출
         mapping_dict = {}
         for item, degree in zip(item_list, degree_list):

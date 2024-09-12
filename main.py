@@ -430,7 +430,8 @@ def main():
     torch.backends.cudnn.deterministic = True
 
 
-    ### model preparation ###
+    ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
+
     print(model_config)
     model = Transformer(**model_config)
 
@@ -494,6 +495,8 @@ def main():
         total_train = data_making.total_train
         total_valid = data_making.total_valid
         total_test = data_making.total_test
+
+        # del data_making # for memory capacity
         
 
     train_ds = MyDataset(total_train)
