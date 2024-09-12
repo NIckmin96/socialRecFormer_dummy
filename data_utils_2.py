@@ -10,12 +10,14 @@ trustnetwork 에서 random walk sequence 생성
 """
 import math
 import os
+import time
 import pickle
 import random
 import networkx as nx
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+import multiprocessing as mp
 from ast import literal_eval    # convert str type list to original type
 from scipy.io import loadmat
 from tqdm.auto import tqdm
@@ -468,12 +470,6 @@ def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:st
     # item_df['product_degree'] = item_df.apply(lambda x: literal_eval(x['product_degree']), axis=1)
     item_df['product_degree'] = item_df.apply(lambda x: str_to_list(x['product_degree']), axis=1)
 
-    # for col in user_df.columns:
-    #     print(f"{col} :", type(user_df[col][0]))
-
-    # for col in item_df.columns:
-    #     print(f"{col} :", type(item_df[col][0]))
-
     # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
     spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
 
@@ -482,6 +478,10 @@ def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:st
     rating_matrix = np.load(data_path + '/rating_matrix.npy')#pd.DataFrame(np.load(data_path + '/rating_matrix.npy'))
 
     total_df = pd.DataFrame(columns=['user_id', 'user_sequences', 'user_degree', 'item_sequences', 'item_degree', 'item_rating', 'spd_matrix'])
+    # hash(dictionary)
+    user_product_dic = dict(zip(item_df['user_id'], item_df['product_id']))
+    user_product_degree_dic = dict(zip(item_df['user_id'], item_df['product_degree']))
+
     for _, data in tqdm(user_df.iterrows(), total=user_df.shape[0]):
         current_user = data['user_id']
         current_sequence = data['random_walk_seq']
@@ -495,10 +495,19 @@ def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:st
         for index in item_indexer:
             if index == 0:
                 continue
-
-            item_list.extend(item_df.loc[item_df['user_id'] == index]['product_id'].values[0])
-            degree_list.extend(item_df.loc[item_df['user_id'] == index]['product_degree'].values[0])
-            user_item_list.extend([index]*len(item_df.loc[item_df['user_id'] == index]['product_id'].values[0]))
+            
+            # FIXME: hash로 수정({user_id:product_id} & {user_id:product_degree} -> memory overflow
+            a = user_product_dic[index]
+            b = user_product_degree_dic[index]
+            c = [index]*len(a)
+            # original
+            # a = item_df.loc[item_df['user_id'] == index]['product_id'].values[0]
+            # b = item_df.loc[item_df['user_id'] == index]['product_degree'].values[0]
+            # c = [index]*len(item_df.loc[item_df['user_id'] == index]['product_id'].values[0])
+            item_list.extend(a)
+            degree_list.extend(b)
+            user_item_list.extend(c)
+            
 
         # 중복을 제거
         item_list_removed_duplicate = list(set(item_list))
@@ -506,19 +515,27 @@ def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:st
         # flat_item_list 원소와 대응되는 degree를 추출
         mapping_dict = {}
         for item, degree in zip(item_list, degree_list):
-            if item not in mapping_dict:
-                mapping_dict[item] = degree
+            # if item not in mapping_dict:
+            #     mapping_dict[item] = degree
+            mapping_dict[item] = degree
+
+        # mapping_dict = dict(zip(item_list, degree_list)) # FIXME
         
         # 추출한 degree를 item_list_removed_duplicate에 대응하여 list 생성
-        degree_list_removed_duplicate = [mapping_dict[item] for item in item_list_removed_duplicate]
+        # degree_list_removed_duplicate = [mapping_dict[item] for item in item_list_removed_duplicate]
+        degree_list_removed_duplicate = list(mapping_dict.values())
 
         # flat_item_list 원소와 대응되는 degree를 추출
         user_mapping_dict = {}
         for item, user in zip(item_list, user_item_list):
-            if item not in user_mapping_dict:
-                user_mapping_dict[item] = user
+            # if item not in user_mapping_dict: # 불필요한 조건
+            #     user_mapping_dict[item] = user
+            user_mapping_dict[item] = user
+        # user_mapping_dict = dict(zip(item_list, user_item_list)) # FIXME
         
         # 중복제거한 list를 정해진 길이 (item_seq_length) 만큼 자르기
+        if len(item_list_removed_duplicate)!=len(degree_list_removed_duplicate):
+            print(f"len(item_list_removed_duplicate) : {len(item_list_removed_duplicate)}, len(degree_list_removed_duplicate) : {len(degree_list_removed_duplicate)}")
         sliced_item_list, num_slices = slice_and_pad_list(item_list_removed_duplicate, slice_length=item_seq_len)
         sliced_degree_list, num_slices = slice_and_pad_list(degree_list_removed_duplicate, slice_length=item_seq_len)
 

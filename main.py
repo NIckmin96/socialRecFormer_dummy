@@ -494,7 +494,7 @@ def main():
         total_train = data_making.total_train
         total_valid = data_making.total_valid
         total_test = data_making.total_test
-        print("Dataset Created!")
+        
 
     train_ds = MyDataset(total_train)
     valid_ds = MyDataset(total_valid)
