@@ -8,3 +8,4 @@ runs/
 tmp/
 drawio/
 test.ipynb
+training_log.txt

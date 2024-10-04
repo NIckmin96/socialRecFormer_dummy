@@ -62,4 +62,33 @@ run 'data_making.py' with proper arguments
             - Previously selected node has specified probability(`RETURN_PARMS`)
             - But, not applied to all previous nodes only the node right before present node
         - Repeat this until user sequence length meets limit(`walk_length`)
+
+9. generate_input_sequence_data
+    - Create final data which will be used in model training(`total_df`)
+
+    |anchor user|user sequence|user degree|item sequence|item degree|rating|user distance|
+    |---|---|---|---|---|---|---|
+    |1|[3,4,5]|[1,1,2]|[1,2,3]|[4,4,5]|[3,3,3]|[1,2,3]|
+
+    1. Get item sequence for each user in user sequence and append items in a list
+        - `item_list`
+    2. Get item degrees for each user in user sequence and append degrees in a list
+        - `degree_list`
+    3. Drop duplicates in `item_list`
+        - `item_list_removed_duplicate`
+    4. Map each item in `item_list` to degree(`degree_list`)
+        - `mapping_dict` ->  (item : degree)
+        - `mapping_dict`'s values -> `degree_list_removed_duplicate`
+    5. Map each item in `item_list` to related user(`user_item_list`)
+        - `user_mapping_dict` -> (item:user)
+    6. `slice_and_pad_list`
+        - pad each list with 0 and make its length n-times of `item_seq_len` and slice
+            - ex: len(item_list) = 110 & `item_seq_len`=30 $\rightarrow$ len(item_list)+[0]*10
+            - `item_list_removed_duplicate`
+            - `degree_list_removed_duplicate`
+    7. Create `spd_matrix`(shortest distance between users)
+        - Get a symmetric subset of total spd matrix(`spd_table`) shaped n_user_sequence $\times$ n_user_sequence
         
+    8. Create rating matrix of 'current users' and 'sliced items'(`small_rating_matrix`)
+    
+    9. Sort them in a dataframe(`total_df`) and save

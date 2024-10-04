@@ -388,6 +388,7 @@ def get_args():
     parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
+    parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     
     args = parser.parse_args()
     return args
@@ -482,7 +483,7 @@ def main():
     test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                               f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
     
-    if os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path):
+    if os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(~args.regenerate):
         total_train = pd.read_pickle(train_path)
         total_valid = pd.read_pickle(valid_path)
         total_test = pd.read_pickle(test_path)
@@ -491,10 +492,14 @@ def main():
         print("Data file doesn't Exist!")
         print("Creating Datatset...")
         print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
-        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs)
+        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.regenerate)
         total_train = data_making.total_train
         total_valid = data_making.total_valid
         total_test = data_making.total_test
+        
+    # print(total_train.shape)
+    # print(total_test.shape)
+    # print(total_valid.shape)
 
         # del data_making # for memory capacity
         

@@ -152,7 +152,7 @@ def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42):
             return rating_train_set, rating_valid_set, rating_test_set
 
         else:
-            globals()[f'rating_{split}_set'] = pd.read_csv(split_file)
+            locals()[f'rating_{split}_set'] = pd.read_csv(split_file)
 
     return rating_train_set, rating_valid_set, rating_test_set
 
@@ -272,7 +272,7 @@ def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, de
 
 #     return user_item_dataframe
 
-def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFrame, user_degree:pd.DataFrame, num_nodes:int=0, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10) -> list:
+def generate_social_random_walk_sequence(data_path:str, social_split:list, user_degree:pd.DataFrame, num_nodes:int=0, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10, regenerate:bool=False) -> list:
     """
     Generate random walk sequence from social graph(trustnetwork).
     Return:
@@ -293,75 +293,137 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
         split: dataset split type (default=train)
         regenerate: to generate random walk sequence once again (default=False)
     """
-    social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
-    if not num_nodes:
-        num_nodes = len(social_graph.nodes())
+    social_train, social_valid, social_test = social_split
 
-    if split=='train':
-        csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv"
-        file_name = data_path + '/' + csv_name
-        if os.path.isfile(file_name):
-            df = pd.read_csv(file_name)
-            print(f"Generated {split} random walk already exists: {csv_name}")
-            return df
-        else:
-            anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
-            anchor_nodes = np.repeat(anchor_nodes,train_augs) ##generate multiple random sequence 
+    social_train = nx.from_pandas_edgelist(social_train, source='user_id_1', target='user_id_2')
+    social_valid = nx.from_pandas_edgelist(social_valid, source='user_id_1', target='user_id_2')
+    social_test = nx.from_pandas_edgelist(social_test, source='user_id_1', target='user_id_2')
+
+    train_anchor_nodes = np.repeat(social_train.nodes(), train_augs)
+    valid_anchor_nodes = social_valid.nodes()
+    test_anchor_nodes = social_test.nodes()
+
+    # if all split data exists -> load
+    # if not -> create all simultaneously
+    train_file = os.path.join(data_path, f"social_user_{len(social_train.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_train_seed_{data_split_seed}_{train_augs}times.csv")
+    valid_file = os.path.join(data_path, f"social_user_{len(social_valid.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_valid_seed_{data_split_seed}.csv")
+    test_file = os.path.join(data_path, f"social_user_{len(social_test.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_test_seed_{data_split_seed}.csv")
+
+    if os.path.isfile(train_file)&os.path.isfile(valid_file)&os.path.isfile(test_file):
+        train_df = pd.read_csv(train_file)
+        valid_df = pd.read_csv(valid_file)
+        test_df = pd.read_csv(test_file)
+
+        return train_df, valid_df, test_df
+    
     else:
-        csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv"
-        file_name = data_path + '/' + csv_name
-        if os.path.isfile(file_name):
-            df = pd.read_csv(file_name)
-            print(f"Generated {split} random walk already exists: {csv_name}")
-            return df
-        else:
-            anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
-    
-    user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
-    anchor_seq_degree = []
-    
-    # At first, there is no previous node, so set it to None.
-    for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
-        seqs = [nodes]
-        wl = 0
-        threshold = 0
-        while wl < walk_length-1:
-            # Move to one of connected node randomly.
-            if wl == 0:
-                next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
-                seqs.append(next_node)
-                wl += 1
-
-            # If selected node was "edge node", there is no movable nodes, so pad it with 0(zero-padding).
-            elif seqs[-1]==0:
-                seqs.append(0)
-                wl += 1
-
-            # Move to one of connected node randomly.
-            else:
-                next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
-                if next_node in seqs:
-                    threshold += 1
-                    if threshold > 10:
-                        seqs.append(0)
-                        wl += 1
+        df_dict = dict()
+        user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
+        # random walk sequence
+        for split in ['train','valid','test']:
+            anchor_seq_degree = []
+            print(f"Creating {split} random walk sequence...")
+            for nodes in tqdm(locals()[f'{split}_anchor_nodes'], desc="Generating random walk sequence..."):
+                seqs = [nodes]
+                wl = 0
+                threshold = 0
+                while wl < walk_length-1:
+                    # 처음 : random next node 추출 후, append
+                    if wl == 0:
+                        next_node = find_next_node(locals()[f'social_{split}'], previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
+                    # 처음이 아닌 경우
                     else:
-                        continue
-                else:
+                        # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
+                        if seqs[-1]==0:
+                            next_node = 0
+                        # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
+                        else:
+                            next_node = find_next_node(locals()[f'social_{split}'], previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+                            if next_node in seqs:
+                                threshold+=1
+                                if threshold > 10:
+                                    next_node = 0
+                                else:
+                                    continue
+                    # next node 추가 후, walk length 하나 올림
                     seqs.append(next_node)
                     wl += 1
-        
-        # revised
-        degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
-        anchor_seq_degree.append([nodes,seqs,degrees])
+                
+                # revised
+                degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
+                anchor_seq_degree.append([nodes,seqs,degrees])
 
-    # revised
-    result_df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
-    result_df.sort_values(by=['user_id'], inplace=True)
-    result_df.reset_index(drop=True, inplace=True)
-    result_df.to_csv(file_name, index=False)
+            # revised
+            df_dict[f'{split}_df'] = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
+            df_dict[f'{split}_df'] = df_dict[f'{split}_df'].sort_values(by=['user_id'])
+            df_dict[f'{split}_df'] = df_dict[f'{split}_df'].reset_index(drop=True)
+            print(f"split : {split}", len(df_dict[f'{split}_df']))
+            df_dict[f'{split}_df'].to_csv(locals()[f'{split}_file'], index=False)
+
+        return df_dict['train_df'], df_dict['valid_df'], df_dict['test_df']
+
+
+    # if split=='train':
+    #     csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv"
+    #     file_name = data_path + '/' + csv_name
+    #     if os.path.isfile(file_name):
+    #         df = pd.read_csv(file_name)
+    #         print(f"Generated {split} random walk already exists: {csv_name}")
+    #         return df
+    #     else:
+    #         anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
+    #         anchor_nodes = np.repeat(anchor_nodes,train_augs) ##generate multiple random sequence 
+    # else:
+    #     csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv"
+    #     file_name = data_path + '/' + csv_name
+    #     if os.path.isfile(file_name):
+    #         df = pd.read_csv(file_name)
+    #         print(f"Generated {split} random walk already exists: {csv_name}")
+    #         return df
+    #     else:
+    #         anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
     
-    return result_df
+    # user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
+    # anchor_seq_degree = []
+    
+    # # At first, there is no previous node, so set it to None.
+    # for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
+    #     seqs = [nodes]
+    #     wl = 0
+    #     threshold = 0
+    #     while wl < walk_length-1:
+    #         # 처음 : random next node 추출 후, append
+    #         if wl == 0:
+    #             next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
+    #         # 처음이 아닌 경우
+    #         else:
+    #             # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
+    #             if seqs[-1]==0:
+    #                 next_node = 0
+    #             # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
+    #             else:
+    #                 next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+    #                 if next_node in seqs:
+    #                     threshold+=1
+    #                     if threshold > 10:
+    #                         next_node = 0
+    #                     else:
+    #                         continue
+    #         # next node 추가 후, walk length 하나 올림
+    #         seqs.append(next_node)
+    #         wl += 1
+        
+    #     # revised
+    #     degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
+    #     anchor_seq_degree.append([nodes,seqs,degrees])
+
+    # # revised
+    # result_df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
+    # result_df.sort_values(by=['user_id'], inplace=True)
+    # result_df.reset_index(drop=True, inplace=True)
+    # result_df.to_csv(file_name, index=False)
+    
+    # return result_df
 
 
 def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
@@ -382,9 +444,6 @@ def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
     if previous_node is not None:
         select_probabilities[previous_node]=RETURN_PARAMS # 이 노드는 RETURN_PARAMS에 의해 결정됨. 
     
-    # print(select_probabilities)
-    # print(select_probabilities_sum)
-    
     if select_probabilities_sum == 0:
         return 0
     
@@ -394,7 +453,7 @@ def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
     )
     return selected_node
     
-def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:str='train', random_walk_len:int=30, item_seq_len:int=100, return_params:int=1, train_augs:int=10):
+def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, random_walk_len:int=30, item_seq_len:int=100, return_params:int=1, train_augs:int=10, regenerate:bool=False):
 
     # if os.path.isfie(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"):
     #     print(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"+" file exists")
@@ -430,148 +489,165 @@ def generate_input_sequence_data(data_path, user_df, item_df, seed:int, split:st
         # Create sliced & padded list
         result_list = [input_list[i:i + slice_length] for i in range(0, len(input_list), slice_length)]
 
-        return result_list, num_slices
-
-    # for col in user_df.columns:
-    #     print(f"{col} :", type(user_df[col][0]))
-
-    # for col in item_df.columns:
-    #     print(f"{col} :", type(item_df[col][0]))
-
-    spd_path = 'shortest_path_result.npy'
-
-    if split=='train':
-        final_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}_{train_augs}times.pkl"
-    else:
-        final_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}.pkl"
-
-    if os.path.isfile(final_path):
-        total_df = pd.read_pickle(final_path)
-        
-        return total_df
-
+        return result_list
+    
     # Load dataset & convert data type
-
     def str_to_list(x):
         if type(x)==str:
             return literal_eval(x)
         else:
             return x 
+
+    spd_path = 'shortest_path_result.npy'
+    total_train_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
+    total_valid_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
+    total_test_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test.pkl"
+
+    if os.path.isfile(total_train_path)&os.path.isfile(total_valid_path)&os.path.isfile(total_test_path):
+        total_train = pd.read_pickle(total_train_path)
+        total_valid = pd.read_pickle(total_valid_path)
+        total_test = pd.read_pickle(total_test_path)
+        
+        return total_train, total_valid, total_test
     
-    # user_df['random_walk_seq'] = user_df.apply(lambda x: literal_eval(x['random_walk_seq']), axis=1)
-    user_df['random_walk_seq'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
-    # user_df['degree'] = user_df.apply(lambda x: literal_eval(x['degree']), axis=1)
-    user_df['degree'] = user_df.apply(lambda x: str_to_list(x['degree']), axis=1)
-
-    # item_df['product_id'] = item_df.apply(lambda x: literal_eval(x['product_id']), axis=1)
-    item_df['product_id'] = item_df.apply(lambda x: str_to_list(x['product_id']), axis=1)
-    # item_df['rating'] = item_df.apply(lambda x: literal_eval(x['rating']), axis=1)
-    item_df['rating'] = item_df.apply(lambda x: str_to_list(x['rating']), axis=1)
-    # item_df['product_degree'] = item_df.apply(lambda x: literal_eval(x['product_degree']), axis=1)
-    item_df['product_degree'] = item_df.apply(lambda x: str_to_list(x['product_degree']), axis=1)
-
     # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
     spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
-
     # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.
-    # rating_table = pd.read_csv(data_path + '/' + item_rating_path, index_col=[])
-    rating_matrix = np.load(data_path + '/rating_matrix.npy')#pd.DataFrame(np.load(data_path + '/rating_matrix.npy'))
+    rating_matrix = np.load(data_path + '/rating_matrix.npy')
 
-    total_df = pd.DataFrame(columns=['user_id', 'user_sequences', 'user_degree', 'item_sequences', 'item_degree', 'item_rating', 'spd_matrix'])
-    # hash(dictionary)
-    user_product_dic = dict(zip(item_df['user_id'], item_df['product_id']))
-    user_product_degree_dic = dict(zip(item_df['user_id'], item_df['product_degree']))
-    product_degree_dic = dict(zip(item_df['product_id'], item_df['product_degree']))
-
-    # FIXME: user_id, user_seqeucne, user_degree, item_sequence, item_degree -> loop 돌지 않고 처리 가능
-    ## 
-
-
-    for _, data in tqdm(user_df.iterrows(), total=user_df.shape[0]):
-        current_user = data['user_id']
-        current_sequence = data['random_walk_seq']
-        current_degree = data['degree']
-
-        item_indexer = [int(x) for x in current_sequence]
-        item_list, degree_list = [], []
-        user_item_list = []
-
-        # 1개의 rw sequence에 있는 사용자들이 상호작용한 모든 아이템 & 해당 아이템들의 degree 가져와서
-        for index in item_indexer:
-            if index == 0:
-                continue
-            
-            # FIXME: hash로 수정({user_id:product_id} & {user_id:product_degree} -> memory overflow
-            a = user_product_dic[index]
-            b = user_product_degree_dic[index]
-            c = [index]*len(a)
-            # original
-            # a = item_df.loc[item_df['user_id'] == index]['product_id'].values[0]
-            # b = item_df.loc[item_df['user_id'] == index]['product_degree'].values[0]
-            # c = [index]*len(item_df.loc[item_df['user_id'] == index]['product_id'].values[0])
-            item_list.extend(a)
-            degree_list.extend(b)
-            user_item_list.extend(c)
-            
-
-        # 중복을 제거
-        item_list_removed_duplicate = list(set(item_list))
+    df_dict = dict()
     
-        # flat_item_list 원소와 대응되는 degree를 추출
-        mapping_dict = {}
-        for item, degree in zip(item_list, degree_list):
-            # if item not in mapping_dict:
-            #     mapping_dict[item] = degree
-            mapping_dict[item] = degree
+    for split in ['train','valid','test']:
+    
+        user_df[f'user_{split}']['random_walk_seq'] = user_df[f'user_{split}'].apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
+        user_df[f'user_{split}']['degree'] = user_df[f'user_{split}'].apply(lambda x: str_to_list(x['degree']), axis=1)
 
-        # mapping_dict = dict(zip(item_list, degree_list)) # FIXME
-        
-        # 추출한 degree를 item_list_removed_duplicate에 대응하여 list 생성
-        # degree_list_removed_duplicate = [mapping_dict[item] for item in item_list_removed_duplicate]
-        degree_list_removed_duplicate = list(mapping_dict.values())
+        item_df[f'item_{split}']['product_id'] = item_df[f'item_{split}'].apply(lambda x: str_to_list(x['product_id']), axis=1)
+        item_df[f'item_{split}']['rating'] = item_df[f'item_{split}'].apply(lambda x: str_to_list(x['rating']), axis=1)
+        item_df[f'item_{split}']['product_degree'] = item_df[f'item_{split}'].apply(lambda x: str_to_list(x['product_degree']), axis=1)
 
-        # flat_item_list 원소와 대응되는 degree를 추출
-        user_mapping_dict = {}
-        for item, user in zip(item_list, user_item_list):
-            # if item not in user_mapping_dict: # 불필요한 조건
-            #     user_mapping_dict[item] = user
-            user_mapping_dict[item] = user
-        # user_mapping_dict = dict(zip(item_list, user_item_list)) # FIXME
-        
-        # 중복제거한 list를 정해진 길이 (item_seq_length) 만큼 자르기
-        if len(item_list_removed_duplicate)!=len(degree_list_removed_duplicate):
-            print(f"len(item_list_removed_duplicate) : {len(item_list_removed_duplicate)}, len(degree_list_removed_duplicate) : {len(degree_list_removed_duplicate)}")
-        sliced_item_list, num_slices = slice_and_pad_list(item_list_removed_duplicate, slice_length=item_seq_len)
-        sliced_degree_list, num_slices = slice_and_pad_list(degree_list_removed_duplicate, slice_length=item_seq_len)
+        # hash(dictionary)
+        user_product_dic = dict(zip(item_df[f'item_{split}']['user_id'], item_df[f'item_{split}']['product_id']))
+        # user_product_degree_dic = dict(zip(item_df[f'item_{split}']['user_id'], item_df[f'item_{split}']['product_degree']))
+        # product : product_degree
+        all_item, all_degree = [],[]
+        for item_list, item_degree in zip(item_df[f'item_{split}']['product_id'], item_df[f'item_{split}']['product_degree']):
+            all_item.extend(item_list)
+            all_degree.extend(item_degree)
 
-        spd_matrix = spd_table[torch.LongTensor(current_sequence).squeeze() - 1, :][:, torch.LongTensor(current_sequence).squeeze() - 1]
+        product_degree_dic = dict(zip(all_item, all_degree))
 
-        # 자른 list와 위 정보들을 dataframe에 담아서 저장
-        for item_list, degree_list in zip(sliced_item_list, sliced_degree_list):
+        ############################################ NEW ############################################
+        # new total df creation method(based on map function)
+        tqdm.pandas()
 
-            # 현재 선택된 user_seq에 있는 사용자들과 sliced item_seq에 대해 [seq_len_user, seq_len_item] 크기의 rating table 생성
-            small_rating_matrix = torch.zeros((len(current_sequence), item_seq_len), dtype=torch.long)
-            # print(len(rating_matrix[0]))
-            for i in range(small_rating_matrix.shape[0]):      # user loop (row)
-                matrix_user = current_sequence[i]
-                for j in range(small_rating_matrix.shape[1]):  # item loop (col)
-                    matrix_item = item_list[j]
-                    small_rating_matrix[i][j] = rating_matrix[matrix_user][matrix_item]#[0]
+        df_dict[f'total_{split}'] = pd.DataFrame(columns=['user_id', 'user_sequences', 'user_degree', 'item_sequences', 'item_degree', 'item_rating', 'spd_matrix'])
+        # user
+        df_dict[f'total_{split}']['user_id'] = user_df[f'user_{split}']['user_id']
+        df_dict[f'total_{split}']['user_sequences'] = user_df[f'user_{split}']['random_walk_seq']
+        df_dict[f'total_{split}']['user_degree'] = user_df[f'user_{split}']['degree']
+        # item
+        print("Processing Item sequences / Degrees ...")
+        df_dict[f'total_{split}']['item_sequences'] = df_dict[f'total_{split}']['user_sequences'].progress_map(lambda seq:list(map(lambda x:user_product_dic[x], seq)))
+        df_dict[f'total_{split}']['item_sequences'] = df_dict[f'total_{split}']['item_sequences'].progress_map(lambda x:sum(x,start=[])).map(lambda x:list(set(x)-set([0])))
+        df_dict[f'total_{split}']['item_degree'] = df_dict[f'total_{split}']['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
+        # slice item & degree
+        print("Processing Item sequences/Degrees Slicing ...")
+        df_dict[f'total_{split}']['item_sequences'] = df_dict[f'total_{split}']['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        df_dict[f'total_{split}']['item_degree'] = df_dict[f'total_{split}']['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        df_dict[f'total_{split}'] = df_dict[f'total_{split}'].explode(['item_sequences','item_degree']).reset_index(drop=True)
+        print(df_dict[f'total_{split}'].shape)
+        # spd matrix
+        print("Processing Spd Matrix ...")
+        df_dict[f'total_{split}']['spd_matrix'] = df_dict[f'total_{split}']['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
+        # rating matrix(user-item)
+        print("Processing Rating Matrix ...")
+        df_dict[f'total_{split}']['item_rating']=df_dict[f'total_{split}'].progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
+
+        with open(locals()[f'total_{split}_path'], "wb") as file:
+            pickle.dump(df_dict[f'total_{split}'], file)
+
+    return df_dict['total_train'], df_dict['total_valid'], df_dict['total_test']
+    
+
+    ############################################ Original ############################################
+    # total_df = pd.DataFrame(columns=['user_id', 'user_sequences', 'user_degree', 'item_sequences', 'item_degree', 'item_rating', 'spd_matrix'])
+    # for _, data in tqdm(user_df.iterrows(), total=user_df.shape[0]):
+    #     current_user = data['user_id']
+    #     current_sequence = data['random_walk_seq']
+    #     current_degree = data['degree']
+
+    #     user_sequence = [int(x) for x in current_sequence]
+    #     item_list, degree_list = [], []
+    #     user_item_list = []
+
+    #     # 1개의 rw sequence에 있는 사용자들이 상호작용한 모든 아이템 & 해당 아이템들의 degree 가져와서
+    #     for user in user_sequence: # user sequence
+    #         if user == 0:
+    #             continue
             
-            total_df.loc[len(total_df)] = [current_user, 
-                                            current_sequence, 
-                                            current_degree, 
-                                            item_list, 
-                                            degree_list, 
-                                            small_rating_matrix,
-                                            spd_matrix]
+    #         # FIXME: hash로 수정({user_id:product_id} & {user_id:product_degree} -> memory overflow
+    #         a = user_product_dic[user] # user to product
+    #         b = user_product_degree_dic[user] # user to product degree
+    #         c = [user]*len(a)
+    #         # original
+    #         # a = item_df.loc[item_df['user_id'] == index]['product_id'].values[0]
+    #         # b = item_df.loc[item_df['user_id'] == index]['product_degree'].values[0]
+    #         # c = [index]*len(item_df.loc[item_df['user_id'] == index]['product_id'].values[0])
+    #         item_list.extend(a)
+    #         degree_list.extend(b)
+    #         user_item_list.extend(c)
+            
 
-    ########################### FIXME: 초안모델 디버깅용으로 user_id=100 까지만 기록. ###########################
-        # if current_user == 100:
-        #     break
+    #     # 중복을 제거(item list)
+    #     item_list_removed_duplicate = list(set(item_list))
+    
+    #     # flat_item_list 원소와 대응되는 degree를 추출
+    #     mapping_dict = {}
+    #     for item, degree in zip(item_list, degree_list):
+    #         if item not in mapping_dict:
+    #             mapping_dict[item] = degree
+    #         # mapping_dict[item] = degree
 
-    with open(final_path, "wb") as file:
-        pickle.dump(total_df, file)
+    #     # mapping_dict = dict(zip(item_list, degree_list))
+        
+    #     # 추출한 degree를 item_list_removed_duplicate에 대응하여 list 생성
+    #     degree_list_removed_duplicate = [mapping_dict[item] for item in item_list_removed_duplicate]
+    #     # degree_list_removed_duplicate = list(mapping_dict.values())
+
+    #     # flat_item_list 원소와 대응되는 degree를 추출
+    #     # user_mapping_dict = {}
+    #     # for item, user in zip(item_list, user_item_list):
+    #     #     # if item not in user_mapping_dict: # 불필요한 조건
+    #     #     #     user_mapping_dict[item] = user
+    #     #     user_mapping_dict[item] = user
+    #     # user_mapping_dict = dict(zip(item_list, user_item_list)) # FIXME
+        
+    #     # 중복제거한 list를 정해진 길이 (item_seq_length) 만큼 자르기
+    #     sliced_item_list = slice_and_pad_list(item_list_removed_duplicate, slice_length=item_seq_len)
+    #     sliced_degree_list = slice_and_pad_list(degree_list_removed_duplicate, slice_length=item_seq_len)
+    #     # 현재 row의 user_sequence에 해당되는 spd matrix 만들기(symmetric matrix)
+    #     spd_matrix = spd_table[torch.LongTensor(current_sequence).squeeze() - 1, :][:, torch.LongTensor(current_sequence).squeeze() - 1]
+
+    #     # 자른 list와 위 정보들을 dataframe에 담아서 저장
+    #     for sliced_item, slice_degree in zip(sliced_item_list, sliced_degree_list):
+
+    #         # 현재 선택된 user_seq에 있는 사용자들과 sliced item_seq에 대해 [seq_len_user, seq_len_item] 크기의 rating table 생성
+    #         small_rating_matrix = torch.zeros((len(current_sequence), item_seq_len), dtype=torch.long)
+            
+    #         for i in range(small_rating_matrix.shape[0]):      # user loop (row)
+    #             matrix_user = current_sequence[i] # each user
+    #             for j in range(small_rating_matrix.shape[1]):  # item loop (col)
+    #                 matrix_item = sliced_item[j] # each item
+    #                 small_rating_matrix[i][j] = rating_matrix[matrix_user][matrix_item] # fill sparse rating matrix
+            
+    #         total_df.loc[len(total_df)] = [current_user, 
+    #                                         current_sequence, 
+    #                                         current_degree, 
+    #                                         sliced_item, 
+    #                                         slice_degree, 
+    #                                         small_rating_matrix,
+    #                                         spd_matrix]
 
 def pad_list(input_list:list, slice_length:int):
         """
