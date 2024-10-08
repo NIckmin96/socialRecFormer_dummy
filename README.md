@@ -1,3 +1,7 @@
+# requirements
+pip==24.0
+setuptools=59.5.0
+
 # socialRecFormer_dummy
 Reference : https://github.com/Bokyeong1001/SocialRecFormer
 
