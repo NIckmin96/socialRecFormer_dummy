@@ -127,31 +127,31 @@ def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42):
         test: percentage of test & valid dataset (default: 10%)
         seed: random seed (default=42)
     """
+    train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
+    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
-    for split in ['train','valid','test']:
-        split_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
+    if os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path):
+        rating_train_set = pd.read_csv(train_path)
+        rating_valid_set = pd.read_csv(valid_path)
+        rating_test_set = pd.read_csv(test_path)
+        
+    else:
+        rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
+        ### train test split TODO: Change equation for split later on    
+        split_rating_df = shuffle(rating_df, random_state=seed)
 
-        if not os.path.isfile(split_file):
-            rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
-            ### train test split TODO: Change equation for split later on    
-            split_rating_df = shuffle(rating_df, random_state=seed)
+        num_test = int(len(split_rating_df) * test)
+        
+        rating_test_set = split_rating_df.iloc[:num_test]
+        rating_valid_set = split_rating_df.iloc[num_test:2 * num_test]
+        rating_train_set = split_rating_df.iloc[2 * num_test:]
 
-            num_test = int(len(split_rating_df) * test)
-            
-            rating_test_set = split_rating_df.iloc[:num_test]
-            rating_valid_set = split_rating_df.iloc[num_test:2 * num_test]
-            rating_train_set = split_rating_df.iloc[2 * num_test:]
+        rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
+        rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
+        rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
 
-            rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
-            rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
-            rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
-
-            print(f"data split finished, seed: {seed}")
-            
-            return rating_train_set, rating_valid_set, rating_test_set
-
-        else:
-            locals()[f'rating_{split}_set'] = pd.read_csv(split_file)
+        print(f"data split finished, seed: {seed}")
 
     return rating_train_set, rating_valid_set, rating_test_set
 
@@ -308,7 +308,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
 
     # dataframe return 시키는 부분
     if os.path.isfile(file_path)&(not regenerate):
-        print("Loading {split} random walk sequence file... \n")
+        print(f"Loading {split} random walk sequence file... \n")
         return pd.read_csv(file_path)
     
     else:
@@ -350,20 +350,21 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
                 degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
                 tmp = [nodes, seqs, degrees]
                 # 중복 확인
-                s2.add(tuple(tmp))
+                s2.add(tuple(seqs))
                 if s2&seq_set: # 중복되는 sequence가 있는 경우에 sequence 재생성
+                    print("삐삐빅")
                     continue
                 else:
                     break
                 
             anchor_seq_degree.append([nodes,seqs,degrees])
 
-            # revised
-            df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
-            df = df.sort_values(by=['user_id'])
-            df = df.reset_index(drop=True)
-            print(f"split : {split}", len(df))
-            df.to_csv(file_path, index=False)
+        # revised
+        df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
+        df = df.sort_values(by=['user_id'])
+        df = df.reset_index(drop=True)
+        print(f"split : {split} \n", len(df))
+        df.to_csv(file_path, index=False)
 
         return df
 
@@ -454,12 +455,14 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(not regenerate):
-        print("Loading total df(input_sequence_data)...\n")
+        print(f"{split} total df(input_sequence_data) already exists!")
+        print(total_path)
+        print(f"Loading {split} total df(input_sequence_data)...\n")
         total_df = pd.read_pickle(total_path)
         return total_df
     
-    print("total df(input_sequence_data) doesn't exist!")
-    print("Creating total df(input_sequence_data)... \n")
+    print(f"{split} total df(input_sequence_data) doesn't exist!")
+    print(f"Creating {split} total df(input_sequence_data)... \n")
     # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
     spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
     # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.

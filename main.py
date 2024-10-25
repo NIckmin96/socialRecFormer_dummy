@@ -495,7 +495,7 @@ def main():
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                                 f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
     
-    print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+    print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs} \n")
     data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
     total_train = data_making.total_train
     total_valid = data_making.total_valid
