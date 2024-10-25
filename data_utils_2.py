@@ -131,8 +131,7 @@ def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42):
     for split in ['train','valid','test']:
         split_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
 
-        # split 파일이 하나라도 없는 경우
-        if split_file not in os.listdir(data_path):
+        if not os.path.isfile(split_file):
             rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
             ### train test split TODO: Change equation for split later on    
             split_rating_df = shuffle(rating_df, random_state=seed)
@@ -161,7 +160,7 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
     Generate social graph from train/test/validation dataset
     """
     split_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
-    if split_file not in os.listdir(data_path):
+    if not os.path.isfile(split_file):
         trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
         social_split = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
@@ -272,7 +271,7 @@ def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, de
 
 #     return user_item_dataframe
 
-def generate_social_random_walk_sequence(data_path:str, social_split:list, user_degree:pd.DataFrame, num_nodes:int=0, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10, regenerate:bool=False) -> list:
+def generate_social_random_walk_sequence(data_path:str, social_split:list, user_degree:pd.DataFrame, num_nodes:int=0, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10, test_augs:bool=False) -> list:
     """
     Generate random walk sequence from social graph(trustnetwork).
     Return:
@@ -301,13 +300,21 @@ def generate_social_random_walk_sequence(data_path:str, social_split:list, user_
 
     train_anchor_nodes = np.repeat(social_train.nodes(), train_augs)
     valid_anchor_nodes = social_valid.nodes()
-    test_anchor_nodes = social_test.nodes()
+    # test set augmentation 여부 확인
+    if not test_augs:
+        test_anchor_nodes = social_test.nodes()
+    else:
+        test_anchor_nodes = np.repeat(social_test.nodes(), train_augs)
+    
 
     # if all split data exists -> load
     # if not -> create all simultaneously
     train_file = os.path.join(data_path, f"social_user_{len(social_train.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_train_seed_{data_split_seed}_{train_augs}times.csv")
     valid_file = os.path.join(data_path, f"social_user_{len(social_valid.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_valid_seed_{data_split_seed}.csv")
-    test_file = os.path.join(data_path, f"social_user_{len(social_test.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_test_seed_{data_split_seed}.csv")
+    if not test_augs:
+        test_file = os.path.join(data_path, f"social_user_{len(social_test.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_test_seed_{data_split_seed}.csv")
+    else:
+        test_file = os.path.join(data_path, f"social_user_{len(social_test.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_test_seed_{data_split_seed}_{train_augs}times.csv")
 
     if os.path.isfile(train_file)&os.path.isfile(valid_file)&os.path.isfile(test_file):
         train_df = pd.read_csv(train_file)
@@ -322,35 +329,46 @@ def generate_social_random_walk_sequence(data_path:str, social_split:list, user_
         # random walk sequence
         for split in ['train','valid','test']:
             anchor_seq_degree = []
+            s = set()
             print(f"Creating {split} random walk sequence...")
             for nodes in tqdm(locals()[f'{split}_anchor_nodes'], desc="Generating random walk sequence..."):
-                seqs = [nodes]
-                wl = 0
-                threshold = 0
-                while wl < walk_length-1:
-                    # 처음 : random next node 추출 후, append
-                    if wl == 0:
-                        next_node = find_next_node(locals()[f'social_{split}'], previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
-                    # 처음이 아닌 경우
-                    else:
-                        # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
-                        if seqs[-1]==0:
-                            next_node = 0
-                        # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
+                while True:
+                    seqs = [nodes]
+                    wl = 0
+                    threshold = 0
+                    s2 = set()
+                    while wl < walk_length-1:
+                        # 처음 : random next node 추출 후, append
+                        if wl == 0:
+                            next_node = find_next_node(locals()[f'social_{split}'], previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
+                        # 처음이 아닌 경우
                         else:
-                            next_node = find_next_node(locals()[f'social_{split}'], previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
-                            if next_node in seqs:
-                                threshold+=1
-                                if threshold > 10:
-                                    next_node = 0
-                                else:
-                                    continue
-                    # next node 추가 후, walk length 하나 올림
-                    seqs.append(next_node)
-                    wl += 1
+                            # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
+                            if seqs[-1]==0:
+                                next_node = 0
+                            # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
+                            else:
+                                next_node = find_next_node(locals()[f'social_{split}'], previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+                                if next_node in seqs:
+                                    threshold+=1
+                                    if threshold > 10:
+                                        next_node = 0
+                                    else:
+                                        continue
+                        # next node 추가 후, walk length 하나 올림
+                        seqs.append(next_node)
+                        wl += 1
                 
-                # revised
-                degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
+                    # revised
+                    degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
+                    tmp = [nodes, seqs, degrees]
+                    # 중복 확인
+                    s2.add(tuple(tmp))
+                    if s2&s:
+                        continue
+                    else:
+                        break
+                    
                 anchor_seq_degree.append([nodes,seqs,degrees])
 
             # revised
@@ -363,70 +381,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:list, user_
         return df_dict['train_df'], df_dict['valid_df'], df_dict['test_df']
 
 
-    # if split=='train':
-    #     csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv"
-    #     file_name = data_path + '/' + csv_name
-    #     if os.path.isfile(file_name):
-    #         df = pd.read_csv(file_name)
-    #         print(f"Generated {split} random walk already exists: {csv_name}")
-    #         return df
-    #     else:
-    #         anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
-    #         anchor_nodes = np.repeat(anchor_nodes,train_augs) ##generate multiple random sequence 
-    # else:
-    #     csv_name = f"social_user_{num_nodes}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv"
-    #     file_name = data_path + '/' + csv_name
-    #     if os.path.isfile(file_name):
-    #         df = pd.read_csv(file_name)
-    #         print(f"Generated {split} random walk already exists: {csv_name}")
-    #         return df
-    #     else:
-    #         anchor_nodes = np.random.choice(social_graph.nodes(), size=num_nodes, replace=False)
-    
-    # user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
-    # anchor_seq_degree = []
-    
-    # # At first, there is no previous node, so set it to None.
-    # for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
-    #     seqs = [nodes]
-    #     wl = 0
-    #     threshold = 0
-    #     while wl < walk_length-1:
-    #         # 처음 : random next node 추출 후, append
-    #         if wl == 0:
-    #             next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
-    #         # 처음이 아닌 경우
-    #         else:
-    #             # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
-    #             if seqs[-1]==0:
-    #                 next_node = 0
-    #             # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
-    #             else:
-    #                 next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
-    #                 if next_node in seqs:
-    #                     threshold+=1
-    #                     if threshold > 10:
-    #                         next_node = 0
-    #                     else:
-    #                         continue
-    #         # next node 추가 후, walk length 하나 올림
-    #         seqs.append(next_node)
-    #         wl += 1
-        
-    #     # revised
-    #     degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
-    #     anchor_seq_degree.append([nodes,seqs,degrees])
-
-    # # revised
-    # result_df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
-    # result_df.sort_values(by=['user_id'], inplace=True)
-    # result_df.reset_index(drop=True, inplace=True)
-    # result_df.to_csv(file_name, index=False)
-    
-    # return result_df
-
-
-def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
+def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
     """
     input_G의 current_node에서 weight를 고려하여 다음 노드를 선택함. 
     - 이 과정에서 RETURN_params를 고려함. 
@@ -453,7 +408,7 @@ def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS):
     )
     return selected_node
     
-def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, random_walk_len:int=30, item_seq_len:int=100, return_params:int=1, train_augs:int=10, regenerate:bool=False):
+def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, random_walk_len:int=30, item_seq_len:int=100, return_params:int=1, train_augs:int=10, test_augs:bool=False):
 
     # if os.path.isfie(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"):
     #     print(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"+" file exists")
@@ -499,9 +454,15 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
             return x 
 
     spd_path = 'shortest_path_result.npy'
-    total_train_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
-    total_valid_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
-    total_test_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test.pkl"
+    # test set augmentation 여부 확인
+    if test_augs:
+        total_train_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
+        total_valid_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
+        total_test_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
+    else:
+        total_train_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
+        total_valid_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
+        total_test_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test.pkl"
 
     if os.path.isfile(total_train_path)&os.path.isfile(total_valid_path)&os.path.isfile(total_test_path):
         total_train = pd.read_pickle(total_train_path)

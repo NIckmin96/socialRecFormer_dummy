@@ -96,3 +96,15 @@ run 'data_making.py' with proper arguments
     8. Create rating matrix of 'current users' and 'sliced items'(`small_rating_matrix`)
     
     9. Sort them in a dataframe(`total_df`) and save
+
+########################################################## Test-set Augmentation ##########################################################
+# Augment Test set Data in proportion to train set data
+- if `train_augs = 2`, then `test_augs = 2`
+    - `data_utils_2` -> `generate_social_random_walk_sequence`
+
+### `generate_social_random_walk_sequence` 수정
+- train/valid/test 간 중복되는 sequence는 없음(처음부터 사용되는 데이터에서 anchor노드를 split하기 때문에 ->  `generate_social_dataset`에서 split 진행)
+- 하지만, 동일한 데이터셋 내에서 중복되는 sequence가 생길수도 있음
+    - Anchor node를 기준으로 random하게 sequence를 생성하지만, 중복을 확인하는 장치는 없음
+    - 중복되는 sequence가 학습에 사용되면 overfitting의 위험성이 있음
+    - 중복되는 경우가 현재는 확인된 바는 없지만, 장치를 만들어줄 필요 있음
