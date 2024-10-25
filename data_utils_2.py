@@ -329,7 +329,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:list, user_
         # random walk sequence
         for split in ['train','valid','test']:
             anchor_seq_degree = []
-            s = set()
+            seq_set = set()
             print(f"Creating {split} random walk sequence...")
             for nodes in tqdm(locals()[f'{split}_anchor_nodes'], desc="Generating random walk sequence..."):
                 while True:
@@ -364,7 +364,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:list, user_
                     tmp = [nodes, seqs, degrees]
                     # 중복 확인
                     s2.add(tuple(tmp))
-                    if s2&s:
+                    if s2&seq_set: # 중복되는 sequence가 있는 경우에 sequence 재생성
                         continue
                     else:
                         break
