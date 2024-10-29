@@ -300,6 +300,8 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
         if test_augs:
             test_augs = min(train_augs, 5) # test set augmentation은 최대 5배까지
             anchor_nodes = np.repeat(social_split.nodes(), test_augs)
+    else:
+        anchor_nodes = social_split.nodes()
 
     if split=='train':
         file_path = os.path.join(data_path, f"social_user_{len(social_split.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
