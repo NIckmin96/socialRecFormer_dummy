@@ -298,7 +298,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
         anchor_nodes = np.repeat(social_split.nodes(), train_augs)
     elif split=='test':
         if test_augs:
-            test_augs = min(train_augs, 5) # test set augmentation은 최대 5배까지
+            test_augs = min(train_augs, 3) # test set augmentation은 최대 3배까지
             anchor_nodes = np.repeat(social_split.nodes(), test_augs)
         else:
             anchor_nodes = social_split.nodes()
@@ -458,7 +458,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
     else:
         if test_augs:
-            test_augs = min(train_augs, 5) # test augmentation은 최대 5배까지
+            test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
             total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
         else:
             total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test.pkl"
