@@ -206,7 +206,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                 
             # loss = criterion(outputs.float(), batch['item_rating'].float())
             
-            #######dec_loss
+            ####### dec_loss
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             org_loss = torch.sum(squared_diff) / torch.sum(mask)
@@ -388,10 +388,11 @@ def get_args():
     parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
-    parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not")    
+    parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     
     args = parser.parse_args()
+    args.name = f'{args.dataset}_{args.data_seed}_{args.user_seq_len}_{args.item_seq_len}_{args.train_augs}_{min(3,args.train_augs) if args.test_augs else ''}'
     return args
 
 def main():
@@ -440,7 +441,7 @@ def main():
     checkpoint_dir = os.path.join(checkpoint_dir, "train")
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-    checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model')
+    checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     training_config["checkpoint_path"] = checkpoint_path
     """if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
@@ -536,13 +537,13 @@ def main():
         # steps_per_epoch는 한 epoch에서의 전체 step 수: (total_number_of_train_samples / batch_size)
     total_epochs = training_config["num_epochs"]
     total_train_samples = len(train_ds)
-    training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs)
+    training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs) # why divisor = 'total_epochs' not 'batch_size'???
     
 
     
     # lr_scheduler = WarmupCosineSchedule(optimizer, warmup_steps=training_config["warmup"], t_total=total_train_samples*total_epochs)
     
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
         optimizer = optimizer,
         max_lr = training_config["learning_rate"],
         pct_start = training_config["warmup"] / training_config["num_train_steps"],
