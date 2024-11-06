@@ -58,7 +58,7 @@ class Encoder(nn.Module):
         # Generate mask for padded data
         src_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
 
-        # Spatial Encoding
+        # Spatial Encoding [TODO] attn_bias 만드는 과정에서 불필요한 permutation 제거
             # [batch_size, seq_length, seq_length, num_heads] ==> [batch_size, num_heads, seq_length, seq_length]
         attn_bias = self.spatial_pos_bias(batched_data).permute(0, 3, 2, 1)
 
