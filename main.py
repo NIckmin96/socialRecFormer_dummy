@@ -392,7 +392,7 @@ def get_args():
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     
     args = parser.parse_args()
-    args.name = f"{args.dataset}_{args.data_seed}_{args.user_seq_len}_{args.item_seq_len}_{args.train_augs}_{min(3,args.train_augs) if args.test_augs else ''}"
+    args.name = f"{args.dataset}_{args.data_seed}_{args.user_seq_len}_{args.item_seq_len}_{args.train_augs}{'_'+str(min(3,args.train_augs)) if args.test_augs else ''}"
     return args
 
 def main():
