@@ -407,8 +407,9 @@ def main():
     training_config = Config[args.dataset]["training"]
 
     training_config["learning_rate"] = args.lr
-    model_config["num_layers_enc"] = args.num_layers_enc
-    model_config["num_layers_dec"] = args.num_layers_dec
+    # model expansion (1) : Increase # of Encoder/Decoder Blocks
+    model_config["num_layers_enc"] = int(math.log(args.train_augs+1,2)*args.num_layers_enc)
+    model_config["num_layers_dec"] = int(math.log(args.train_augs+1,2)*args.num_layers_dec)
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
