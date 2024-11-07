@@ -317,7 +317,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
 
     # dataframe return 시키는 부분
     if os.path.isfile(file_path)&(not regenerate):
-        print(f"Loading {split} random walk sequence file... \n")
+        print(f"Loading {split} random walk sequence file...")
         return pd.read_csv(file_path)
     
     else:
@@ -326,7 +326,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
         anchor_seq_degree = []
         seq_set = set()
         print(f"{split} random walk sequence file doesn't exist!")
-        print(f"Creating {split} random walk sequence... \n")
+        print(f"Creating {split} random walk sequence...")
         for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
             while True:
                 seqs = [nodes]
@@ -372,7 +372,8 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
         df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
         df = df.sort_values(by=['user_id'])
         df = df.reset_index(drop=True)
-        print(f"split : {split} \n", len(df))
+        print(f"split : {split} / len : {len(df)}")
+        print("\n")
         df.to_csv(file_path, index=False)
 
         return df
@@ -467,12 +468,12 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
     if os.path.isfile(total_path)&(not regenerate):
         print(f"{split} total df(input_sequence_data) already exists!")
         print(total_path)
-        print(f"Loading {split} total df(input_sequence_data)...\n")
+        print(f"Loading {split} total df(input_sequence_data)...")
         total_df = pd.read_pickle(total_path)
         return total_df
     
     print(f"{split} total df(input_sequence_data) doesn't exist!")
-    print(f"Creating {split} total df(input_sequence_data)... \n")
+    print(f"Creating {split} total df(input_sequence_data)...")
     # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
     spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
     # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.
@@ -521,6 +522,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
     total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
     # rating matrix(user-item)
     print("Processing Rating Matrix ...")
+    print("\n")
     total_df['item_rating']=total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
 
     with open(total_path, "wb") as file:
