@@ -442,16 +442,17 @@ def main():
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
     
-    name_dataset = args.dataset
-    name_seed = args.data_seed
-    name_u_len = args.user_seq_len
-    name_i_len = args.item_seq_len
-    name_n_enc = model_config['num_layers_enc']
-    name_n_dec = model_config['num_layers_dec']
-    name_train_augs = args.train_augs
-    name_test_augs = '_'+str(min(3,args.train_augs)) if args.test_augs else ''
+    name_dataset = str(args.dataset)
+    name_seed = str(args.data_seed)
+    name_u_len = str(args.user_seq_len)
+    name_i_len = str(args.item_seq_len)
+    name_n_enc = str(model_config['num_layers_enc'])
+    name_n_dec = str(model_config['num_layers_dec'])
+    name_train_augs = str(args.train_augs)
+    name_test_augs = str('_'+str(min(3,args.train_augs)) if args.test_augs else '')
     args.name = '_'.join([name_dataset, name_seed, name_u_len, name_i_len, name_n_enc, name_n_dec, name_train_augs, name_test_augs])
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
+    print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
     """if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
