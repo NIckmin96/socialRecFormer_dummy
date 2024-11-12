@@ -449,7 +449,7 @@ def main():
     name_n_enc = str(model_config['num_layers_enc'])
     name_n_dec = str(model_config['num_layers_dec'])
     name_train_augs = str(args.train_augs)
-    name_test_augs = str('_'+str(min(3,args.train_augs)) if args.test_augs else '')
+    name_test_augs = str(str(min(3,args.train_augs)) if args.test_augs else '')
     args.name = '_'.join([name_dataset, name_seed, name_u_len, name_i_len, name_n_enc, name_n_dec, name_train_augs, name_test_augs])
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     print(checkpoint_path, "\n")
