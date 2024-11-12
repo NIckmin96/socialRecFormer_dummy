@@ -141,7 +141,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
         rmse = torch.sqrt(torch.mean(torch.pow((pred[msk].float() - trg[msk].float()), 2)))
 
-        if (total_rmse<baseline_rmse & total_mae<baseline_mae):
+        if (torch.mean(total_rmse, dim=0).item()<baseline_rmse) & (torch.mean(total_mae, dim=0).item()<baseline_mae):
             if (total_rmse+total_mae < best_dev_rmse+best_dev_mae): # 1번 우선순위(baseline보다 좋고, best보다 좋은 경우)
                 best_dev_rmse = total_rmse
                 best_dev_mae = total_mae
