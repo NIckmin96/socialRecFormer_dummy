@@ -31,6 +31,8 @@ ciao={
             "alpha":1,
             "beta":3,
             "gamma":3,
+            "baseline_rmse":1.0154,
+            "baseline_mae":0.7739
          },
      }
 
@@ -67,6 +69,8 @@ epinions={
             "alpha":1,
             "beta":3,
             "gamma":3,
+            "baseline_rmse":0.8383,
+            "baseline_mae":1.0972
          },
      }
 

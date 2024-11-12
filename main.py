@@ -206,7 +206,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                 
             # loss = criterion(outputs.float(), batch['item_rating'].float())
             
-            #######dec_loss
+            ####### dec_loss
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             org_loss = torch.sum(squared_diff) / torch.sum(mask)
@@ -388,9 +388,11 @@ def get_args():
     parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
+    parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     
     args = parser.parse_args()
+    args.name = f"{args.dataset}_{args.data_seed}_{args.user_seq_len}_{args.item_seq_len}_{args.train_augs}{'_'+str(min(3,args.train_augs)) if args.test_augs else ''}"
     return args
 
 def main():
@@ -416,13 +418,6 @@ def main():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    # log_path = os.path.join(log_dir,'{}.{}.log'.format(args.mode, args.name))
-    # redirect_stdout(open(log_path, 'w'))
-
-    # print(json.dumps(args.__dict__, indent = 4))
-
-    # print(json.dumps([model_config, training_config], indent = 4))
-
     ###  set the random seeds for deterministic results. ####
     SEED = args.seed
     #SEED = 42
@@ -446,7 +441,7 @@ def main():
     checkpoint_dir = os.path.join(checkpoint_dir, "train")
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-    checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model')
+    checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     training_config["checkpoint_path"] = checkpoint_path
     """if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
@@ -461,9 +456,10 @@ def main():
 
     device_ids = list(range(torch.cuda.device_count()))
     print(f"GPU list: {device_ids}")
+    print("\n")
     model = model.cuda()
 
-    ### data preparation ###
+    ######################################################### data preparation #########################################################
 
     ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
         ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
@@ -474,28 +470,39 @@ def main():
     1. 파일 있는지 확인(train/valid/test 전부)
     2. 없으면 DatasetMaking 객체 생성
     3. DatasetMaking 객체 내 train/valid/test -> dataset
+
+    regenerate 부분 추가하기
+    - regenerate==True시, 전체 데이터 처음부터 다시 생성하기
+
+    train data 생성시에, valid/test 데이터는 그대로 유지시키기
     '''
-    # 1. file check
+    # regenerate 여부 확인
+    if args.regenerate:
+        print("Re-Creating Datatset...")
+        if args.test_augs:
+            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+        else:
+            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
+        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
+
+    # 1. file path check(train_augs & test_augs)
     train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                               f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
     valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                               f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
-    test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
-    
-    if os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(~args.regenerate):
-        total_train = pd.read_pickle(train_path)
-        total_valid = pd.read_pickle(valid_path)
-        total_test = pd.read_pickle(test_path)
-    
+    if args.test_augs:
+        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
     else:
-        print("Data file doesn't Exist!")
-        print("Creating Datatset...")
-        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
-        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.regenerate)
-        total_train = data_making.total_train
-        total_valid = data_making.total_valid
-        total_test = data_making.total_test
+        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
+    
+    print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+    print("\n")
+    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
+    total_train = data_making.total_train
+    total_valid = data_making.total_valid
+    total_test = data_making.total_test
         
     # print(total_train.shape)
     # print(total_test.shape)
@@ -532,13 +539,13 @@ def main():
         # steps_per_epoch는 한 epoch에서의 전체 step 수: (total_number_of_train_samples / batch_size)
     total_epochs = training_config["num_epochs"]
     total_train_samples = len(train_ds)
-    training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs)
+    training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs) # why divisor = 'total_epochs' not 'batch_size'???
     
 
     
     # lr_scheduler = WarmupCosineSchedule(optimizer, warmup_steps=training_config["warmup"], t_total=total_train_samples*total_epochs)
     
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
         optimizer = optimizer,
         max_lr = training_config["learning_rate"],
         pct_start = training_config["warmup"] / training_config["num_train_steps"],

@@ -28,16 +28,9 @@ class ScaledDotProductAttention(nn.Module):
 
         # 2. Apply attention mask
         if mask is not None:
-            # print(score.shape)
-            # print(mask.shape)
-            # print("##### Mask #####")
-            # print(mask[0][:][0][0].data)
 
-            # print("\n##### Q * K 결과 #####")
-            # print(score[0][:][0][0].data)
-            score = score.masked_fill(mask == 0, -10000)
-            # print("\n##### Q * K 에 masking 결과 #####")
-            # print(score[0][:][0][0].data)
+            score = score.masked_fill(mask == 0, -10000) # mask의 값이 0인 위치에 해당하는 attention score값을 -10000으로 변경
+            
 
         # 3. Apply attention bias (spatial encoding)
         # TODO: add attention bias before softmax
@@ -57,10 +50,10 @@ class ScaledDotProductAttention(nn.Module):
             else:
                 # score += attn_bias  # encoder self-attention 연산 시엔 add -> bias term 추가     
                 #score += self.spd_param
-                #print(self.spd_param.dtype)
+                
                 attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double()) # attn_bias = spd(user distance)
-                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length)
-                #print(loss)
+                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
+                
                 #loss = 0
                 #score += attn_bias
 
