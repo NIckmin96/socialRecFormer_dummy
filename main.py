@@ -141,7 +141,15 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
         rmse = torch.sqrt(torch.mean(torch.pow((pred[msk].float() - trg[msk].float()), 2)))
 
-        if total_rmse+total_mae < best_dev_rmse+best_dev_mae:
+        if (total_rmse<baseline_rmse & total_mae<baseline_mae):
+            if (total_rmse+total_mae < best_dev_rmse+best_dev_mae): # 1번 우선순위(baseline보다 좋고, best보다 좋은 경우)
+                best_dev_rmse = total_rmse
+                best_dev_mae = total_mae
+            else: # 2번 우선순위 : baseline보다 좋지만, metric sum은 best보다 높은 경우
+                best_dev_rmse = total_rmse
+                best_dev_mae = total_mae
+        
+        elif total_rmse+total_mae < best_dev_rmse+best_dev_mae: # 3번 우선순위 : metric sum이 best보다 낮은 경우
             best_dev_rmse = total_rmse
             best_dev_mae = total_mae
             torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
@@ -153,6 +161,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
     return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
+    global baseline_rmse, baseline_mae
 # def train(model, optimizer, ds_iter, training_config, criterion):
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
@@ -164,6 +173,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     checkpoint_path = training_config['checkpoint_path']
     best_dev_rmse = 9999.0
     best_dev_mae = 9999.0
+    baseline_rmse = training_config['baseline_rmse']
+    baseline_mae = training_config['baseline_mae']
 
     total_epochs = training_config["num_epochs"]
 
