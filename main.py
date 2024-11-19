@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -200,6 +201,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     start.record()
 
     # Training step
+    lr_lst = []
     for epoch in range(total_epochs):
         losses = AverageMeter()
         epoch_iterator = tqdm(ds_iter['train'],
@@ -265,12 +267,14 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
             optimizer.step()
             lr_scheduler.step()
+            lr_lst.append(lr_scheduler.get_last_lr())
             #optimizer.zero_grad()
 
             losses.update(loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
+        plt.plot(lr_lst)
         # validation
         end.record()
         torch.cuda.synchronize()
@@ -573,7 +577,8 @@ def main():
         # steps_per_epoch는 한 epoch에서의 전체 step 수: (total_number_of_train_samples / batch_size)
     total_epochs = training_config["num_epochs"]
     total_train_samples = len(train_ds)
-    training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs) # why divisor = 'total_epochs' not 'batch_size'???
+    # training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs) # why divisor = 'total_epochs' not 'batch_size'???
+    training_config["num_train_steps"] = len(ds_iter['train']) # why divisor = 'total_epochs' not 'batch_size'???
     
 
     
@@ -581,11 +586,12 @@ def main():
     
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
         optimizer = optimizer,
-        max_lr = training_config["learning_rate"],
-        pct_start = training_config["warmup"] / training_config["num_train_steps"],
+        max_lr = training_config["learning_rate"]*1e1,
+        # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
         anneal_strategy = training_config["lr_decay"],
         epochs = training_config["num_epochs"],
-        steps_per_epoch = 2 * len(ds_iter['train'])
+        # steps_per_epoch = 2 * len(ds_iter['train'])
+        steps_per_epoch = len(ds_iter['train'])
     )
 
     # criterion = nn.MSELoss()
