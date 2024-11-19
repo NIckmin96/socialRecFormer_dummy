@@ -141,15 +141,27 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
         rmse = torch.sqrt(torch.mean(torch.pow((pred[msk].float() - trg[msk].float()), 2)))
 
+        # baseline의 metric보다 낮은 경우
         if (torch.mean(total_rmse, dim=0).item()<baseline_rmse) & (torch.mean(total_mae, dim=0).item()<baseline_mae):
-            if (total_rmse+total_mae < best_dev_rmse+best_dev_mae): # 1번 우선순위(baseline보다 좋고, best보다 좋은 경우)
+            # best보다 낮은 경우
+            if (total_rmse+total_mae < best_dev_rmse+best_dev_mae): 
                 best_dev_rmse = total_rmse
                 best_dev_mae = total_mae
-            else: # 2번 우선순위 : baseline보다 좋지만, metric sum은 best보다 높은 경우
+                torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
+                print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
+                update_cnt = 0
+            # best보다 높지만, best가 baseline보다 높은 경우 update
+            elif (torch.mean(best_dev_rmse, dim=0).item()>baseline_rmse) | (torch.mean(best_dev_mae, dim=0).item()>baseline_mae): 
                 best_dev_rmse = total_rmse
                 best_dev_mae = total_mae
-        
-        elif total_rmse+total_mae < best_dev_rmse+best_dev_mae: # 3번 우선순위 : metric sum이 best보다 낮은 경우
+                torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
+                print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
+                update_cnt = 0
+            else:
+                update_cnt += 1
+
+        # baseline보다 높지만, best보다 낮은 경우
+        elif total_rmse+total_mae < best_dev_rmse+best_dev_mae:
             best_dev_rmse = total_rmse
             best_dev_mae = total_mae
             torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
