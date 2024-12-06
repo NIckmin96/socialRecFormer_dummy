@@ -16,8 +16,8 @@ ciao={
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
-            "num_layers_enc": 2,
-            "num_layers_dec": 2
+            "num_layers_enc": 6,
+            "num_layers_dec": 6
          },
          "training":{
             "batch_size":128,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)

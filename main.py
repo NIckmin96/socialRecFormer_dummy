@@ -201,8 +201,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     start.record()
 
     # Training step
-    lr_lst = []
     for epoch in range(total_epochs):
+        lr_lst = []
         losses = AverageMeter()
         epoch_iterator = tqdm(ds_iter['train'],
                             desc="Training (X / X Steps) (loss=X.X)",
@@ -274,7 +274,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
-        plt.plot(lr_lst)
+        print(np.max(np.array(lr_lst)), np.min(np.array(lr_lst)), np.mean(np.array(lr_lst)))
         # validation
         end.record()
         torch.cuda.synchronize()
@@ -294,9 +294,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
         # if best_dev_mae < 0.81:
         #     break
-        if epoch > 80:
+        if epoch > 100:
             break
-        if update_cnt > 9:
+        if update_cnt > 10:
             break
     writer.close()
 
@@ -404,8 +404,8 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=2, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=2, help="num dec layers")
+    parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
+    parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
     parser.add_argument('--lr', type=float, default=1e-4)
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
@@ -434,8 +434,8 @@ def main():
 
     training_config["learning_rate"] = args.lr
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    model_config["num_layers_enc"] = int(math.log(args.train_augs+1,2)*args.num_layers_enc)
-    model_config["num_layers_dec"] = int(math.log(args.train_augs+1,2)*args.num_layers_dec)
+    model_config["num_layers_enc"] = int(math.log(args.train_augs+1)*args.num_layers_enc)
+    model_config["num_layers_dec"] = int(math.log(args.train_augs+1)*args.num_layers_dec)
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -578,7 +578,7 @@ def main():
     total_epochs = training_config["num_epochs"]
     total_train_samples = len(train_ds)
     # training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs) # why divisor = 'total_epochs' not 'batch_size'???
-    training_config["num_train_steps"] = len(ds_iter['train']) # why divisor = 'total_epochs' not 'batch_size'???
+    training_config["num_train_steps"] = len(ds_iter['train'])
     
 
     
@@ -586,9 +586,11 @@ def main():
     
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
         optimizer = optimizer,
-        max_lr = training_config["learning_rate"]*1e1,
+        max_lr = training_config["learning_rate"],
         # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
-        anneal_strategy = training_config["lr_decay"],
+        pct_start = 0.15,
+        # anneal_strategy = training_config["lr_decay"],
+        anneal_strategy = 'cos',
         epochs = training_config["num_epochs"],
         # steps_per_epoch = 2 * len(ds_iter['train'])
         steps_per_epoch = len(ds_iter['train'])
