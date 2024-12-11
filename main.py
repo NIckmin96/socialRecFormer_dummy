@@ -586,7 +586,7 @@ def main():
     
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
         optimizer = optimizer,
-        max_lr = training_config["learning_rate"]*1e1,
+        max_lr = training_config["learning_rate"],
         # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
         anneal_strategy = training_config["lr_decay"],
         epochs = training_config["num_epochs"],

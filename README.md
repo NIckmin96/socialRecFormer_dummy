@@ -250,6 +250,10 @@ run 'data_making.py' with proper arguments
             3. Residual Connection
 
 2. Return Prediction Output & total mean loss
+    - 각 decoder block에서 return되는 loss(decoder loss)
+        1. 정답 rating값을 implicit화(0,1) -> (-1,1)
+        2. Attention output과의 MAE 계산
+        - decoder loss = MAE
 
 ## Transformer output
 - Decoder output
