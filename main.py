@@ -7,6 +7,7 @@ import math
 import json
 import time
 import itertools
+import pynvml
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
@@ -26,6 +27,10 @@ from scheduler import WarmupCosineSchedule
 import requests
 
 logger = logging.getLogger(__name__)
+
+class DeviceError(Exception):
+    def __init__(self):
+        super().__init__("GPU not Available.")
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -69,12 +74,19 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
                               leave=False)
         pred, trg, msk = [], [], []
         for step, batch in enumerate(epoch_iterator):
-            batch['user_seq'] = batch['user_seq'].cuda()
-            batch['user_degree'] = batch['user_degree'].cuda()
-            batch['item_list'] = batch['item_list'].cuda()
-            batch['item_degree'] = batch['item_degree'].cuda()
-            batch['item_rating'] = batch['item_rating'].cuda()
-            batch['spd_matrix'] = batch['spd_matrix'].cuda()
+            # batch['user_seq'] = batch['user_seq'].cuda()
+            # batch['user_degree'] = batch['user_degree'].cuda()
+            # batch['item_list'] = batch['item_list'].cuda()
+            # batch['item_degree'] = batch['item_degree'].cuda()
+            # batch['item_rating'] = batch['item_rating'].cuda()
+            # batch['spd_matrix'] = batch['spd_matrix'].cuda()
+
+            batch['user_seq'] = batch['user_seq'].to(device)
+            batch['user_degree'] = batch['user_degree'].to(device)
+            batch['item_list'] = batch['item_list'].to(device)
+            batch['item_degree'] = batch['item_degree'].to(device)
+            batch['item_rating'] = batch['item_rating'].to(device)
+            batch['spd_matrix'] = batch['spd_matrix'].to(device)
 
             outputs, enc_loss, dec_loss = model(batch)
 
@@ -310,7 +322,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     print("total training time (ms): {}".format(total_time))
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("total memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
-    print(torch.cuda.memory_summary(device=0))
+    print(torch.cuda.memory_summary(device=device.index))
 
 
 def eval(model, ds_iter):
@@ -332,12 +344,19 @@ def eval(model, ds_iter):
         for step, batch in enumerate(epoch_iterator):
             
             # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-            batch['user_seq'] = batch['user_seq'].cuda()
-            batch['user_degree'] = batch['user_degree'].cuda()
-            batch['item_list'] = batch['item_list'].cuda()
-            batch['item_degree'] = batch['item_degree'].cuda()
-            batch['item_rating'] = batch['item_rating'].cuda()
-            batch['spd_matrix'] = batch['spd_matrix'].cuda()
+            # batch['user_seq'] = batch['user_seq'].cuda()
+            # batch['user_degree'] = batch['user_degree'].cuda()
+            # batch['item_list'] = batch['item_list'].cuda()
+            # batch['item_degree'] = batch['item_degree'].cuda()
+            # batch['item_rating'] = batch['item_rating'].cuda()
+            # batch['spd_matrix'] = batch['spd_matrix'].cuda()
+
+            batch['user_seq'] = batch['user_seq'].to(device)
+            batch['user_degree'] = batch['user_degree'].to(device)
+            batch['item_list'] = batch['item_list'].to(device)
+            batch['item_degree'] = batch['item_degree'].to(device)
+            batch['item_rating'] = batch['item_rating'].to(device)
+            batch['spd_matrix'] = batch['spd_matrix'].to(device)
             outputs, enc_loss, dec_loss = model(batch)
 
             # loss = criterion(outputs.float(), batch['item_rating'].float())
@@ -427,6 +446,8 @@ def get_args():
     return args
 
 def main():
+    global device
+
     args = get_args()
 
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -498,9 +519,27 @@ def main():
     # print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
 
     device_ids = list(range(torch.cuda.device_count()))
-    print(f"GPU list: {device_ids}")
+    # gpu device선택
+    pynvml.nvmlInit()
+    for i in device_ids:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+        util_info = pynvml.nvmlDeviceGetUtilizationRates(handle)
+        if not util_info.gpu:
+            device = torch.device(f'cuda:{i}')
+            break
+        else:
+            device = 'cpu'
+
+    pynvml.nvmlShutdown()
+
+    if device=='cpu': 
+        raise DeviceError
+    
+    print(f"GPU index: {device.index}")
     print("\n")
-    model = model.cuda()
+    
+    model = model.to(device)
+    # model = model.cuda()
 
     ######################################################### data preparation #########################################################
 
