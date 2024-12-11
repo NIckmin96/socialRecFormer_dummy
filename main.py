@@ -230,11 +230,15 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                 # 따라서 Masked MSELoss를 사용
                 
             # loss = criterion(outputs.float(), batch['item_rating'].float())
+
+
             
             ####### dec_loss
             mask = (batch['item_rating'] != 0)
+            # abs_diff = torch.abs(outputs - batch['item_rating'])*mask
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             org_loss = torch.sum(squared_diff) / torch.sum(mask)
+            org_loss = torch.sqrt(org_loss) # RMSE
 
             ########## new_loss ?
             
@@ -253,7 +257,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             new_loss = torch.sum(squared_diff) / torch.sum(mask)
 
-            loss =  org_loss + new_loss * training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"] 
+            # loss =  org_loss + new_loss * training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"] 
+            loss = org_loss*training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"]
 
             #loss = loss + spd_loss + new_loss
             
