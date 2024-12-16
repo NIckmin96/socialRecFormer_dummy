@@ -74,13 +74,6 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
                               leave=False)
         pred, trg, msk = [], [], []
         for step, batch in enumerate(epoch_iterator):
-            # batch['user_seq'] = batch['user_seq'].cuda()
-            # batch['user_degree'] = batch['user_degree'].cuda()
-            # batch['item_list'] = batch['item_list'].cuda()
-            # batch['item_degree'] = batch['item_degree'].cuda()
-            # batch['item_rating'] = batch['item_rating'].cuda()
-            # batch['spd_matrix'] = batch['spd_matrix'].cuda()
-
             batch['user_seq'] = batch['user_seq'].to(device)
             batch['user_degree'] = batch['user_degree'].to(device)
             batch['item_list'] = batch['item_list'].to(device)
@@ -132,9 +125,6 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
 
             epoch_iterator.set_description(
                         "Validating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
-        
-        # total_rmse = sum(val_rmse) / len(val_rmse)
-        # total_mae = sum(val_mae) / len(val_mae)
 
         # if total_rmse < best_dev_rmse:
         #     best_dev_rmse = total_rmse
@@ -224,12 +214,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         
         for step, batch in enumerate(epoch_iterator):
             # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-            batch['user_seq'] = batch['user_seq'].cuda()
-            batch['user_degree'] = batch['user_degree'].cuda()
-            batch['item_list'] = batch['item_list'].cuda()
-            batch['item_degree'] = batch['item_degree'].cuda()
-            batch['item_rating'] = batch['item_rating'].cuda()
-            batch['spd_matrix'] = batch['spd_matrix'].cuda()
+            batch['user_seq'] = batch['user_seq'].to(device)
+            batch['user_degree'] = batch['user_degree'].to(device)
+            batch['item_list'] = batch['item_list'].to(device)
+            batch['item_degree'] = batch['item_degree'].to(device)
+            batch['item_rating'] = batch['item_rating'].to(device)
+            batch['spd_matrix'] = batch['spd_matrix'].to(device)
 
             # forward pass
             outputs, enc_loss, dec_loss = model(batch)
@@ -344,13 +334,6 @@ def eval(model, ds_iter):
         for step, batch in enumerate(epoch_iterator):
             
             # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-            # batch['user_seq'] = batch['user_seq'].cuda()
-            # batch['user_degree'] = batch['user_degree'].cuda()
-            # batch['item_list'] = batch['item_list'].cuda()
-            # batch['item_degree'] = batch['item_degree'].cuda()
-            # batch['item_rating'] = batch['item_rating'].cuda()
-            # batch['spd_matrix'] = batch['spd_matrix'].cuda()
-
             batch['user_seq'] = batch['user_seq'].to(device)
             batch['user_degree'] = batch['user_degree'].to(device)
             batch['item_list'] = batch['item_list'].to(device)
