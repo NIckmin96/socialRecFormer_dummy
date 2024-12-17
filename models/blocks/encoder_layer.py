@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 from models.layers.multi_head_attention import MultiHeadAttention
-from models.layers.feed_forward_network import FeedForwardNetwork
+from models.layers.feed_forward_network import FeedForwardNetwork, MoE
 
 class EncoderLayer(nn.Module):
     """
@@ -16,7 +16,8 @@ class EncoderLayer(nn.Module):
         self.dropout1 = nn.Dropout(p=dropout)
 
         self.norm2 = nn.LayerNorm(d_model)
-        self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
+        self.moe = MoE(d_model, d_ffn)
+        # self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
         self.dropout2 = nn.Dropout(p=dropout)
     
     def forward(self, x, src_mask, attn_bias):
@@ -32,7 +33,8 @@ class EncoderLayer(nn.Module):
         # 3. FFN
         residual = x
         x = self.norm2(x)
-        x = self.ffn(x)
+        x = self.moe(x)
+        # x = self.ffn(x)
 
         # 4. Add & Norm
         x = self.dropout2(x)

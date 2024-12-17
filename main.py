@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -177,13 +177,10 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
-# def train(model, optimizer, ds_iter, training_config, criterion):
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
     logger.info("***** Running training *****")
     logger.info("  Total steps = %d", training_config["num_train_steps"])
-    
-    #losses = []
 
     checkpoint_path = training_config['checkpoint_path']
     best_dev_rmse = 9999.0

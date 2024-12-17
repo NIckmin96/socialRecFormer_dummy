@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 from models.layers.multi_head_attention import MultiHeadAttention
-from models.layers.feed_forward_network import FeedForwardNetwork
+from models.layers.feed_forward_network import FeedForwardNetwork, MoE
 
 class DecoderLayer(nn.Module):
     """
@@ -28,7 +28,8 @@ class DecoderLayer(nn.Module):
         if not self.last_layer_flag:
             # FFN
             self.norm3 = nn.LayerNorm(d_model)
-            self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
+            self.moe = MoE(d_model, d_ffn)
+            # self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
             self.dropout3 = nn.Dropout(p=dropout)
         
         if self.last_layer_flag:
@@ -73,7 +74,8 @@ class DecoderLayer(nn.Module):
             # 5. FFN
             residual = x
             x = self.norm3(x)
-            x = self.ffn(x)
+            # x = self.ffn(x)
+            x = self.moe(x)
 
             # 6. Add & Norm
             x = self.dropout3(x)
