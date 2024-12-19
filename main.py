@@ -498,13 +498,13 @@ def main():
     # print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
     # print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
 
-    device_ids = list(range(torch.cuda.device_count()))
     # gpu device선택
+    device_ids = list(range(torch.cuda.device_count()))
     pynvml.nvmlInit()
     for i in device_ids:
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
         util_info = pynvml.nvmlDeviceGetUtilizationRates(handle)
-        if not util_info.gpu:
+        if util_info.gpu < 10:
             device = torch.device(f'cuda:{i}')
             break
         else:
