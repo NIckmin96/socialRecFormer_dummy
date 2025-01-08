@@ -23,6 +23,7 @@ from scipy.io import loadmat
 from tqdm.auto import tqdm
 from collections import defaultdict
 from sklearn.utils import shuffle
+from sklearn.preprocessing import minmax_scale
 import torch
 from scipy import sparse
 
@@ -523,7 +524,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
     # rating matrix(user-item)
     print("Processing Rating Matrix ...")
     print("\n")
-    total_df['item_rating']=total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
+    total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
 
     with open(total_path, "wb") as file:
         pickle.dump(total_df, file)

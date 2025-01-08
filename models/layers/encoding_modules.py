@@ -80,9 +80,12 @@ class SpatialEncoder(nn.Module):
         # 현재 user sequence에 있는 사용자들에 대한 SPD matrix는 Dataset class에서 pre-computed되어 있음.
             # [batch_size, seq_length_user, seq_length_user]
         spd_matrix = batched_data['spd_matrix']
+        bs,l,_ = spd_matrix.size()
+        spd_matrix = spd_matrix.view(bs,1,l,l)
 
         # [batch_size, seq_length, seq_length] ==> [num_heads, batch_size, seq_length, seq_length] ==> [batch_size, seq_length, seq_length, num_heads]
-        attn_bias = spd_matrix.repeat(self.num_heads, 1, 1, 1).permute(1, 2, 3, 0)
+        # attn_bias = spd_matrix.repeat(self.num_heads, 1, 1, 1).permute(1, 2, 3, 0)
+        attn_bias = spd_matrix.expand(-1, self.num_heads, -1, -1)
         # attn_bias = self.spatial_pos_encoder(spd_matrix)
 
         return attn_bias
@@ -101,12 +104,12 @@ class ItemNodeEncoder(nn.Module):
 
         # node id embedding table -> similar to word embedding table.
             # table size: [num_item_total, embed_dim]
-        self.node_encoder = nn.Embedding(num_nodes + 1, d_model, padding_idx=0)
+        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2, padding_idx=0)
 
         ### Ablation study: no degree embedding
         # Degree embedding table -> will be index by input's degree information
             # table size: [max_degree, embed_dim]
-        self.degree_encoder = nn.Embedding(max_degree + 1, d_model, padding_idx=0)
+        self.degree_encoder = nn.Embedding(max_degree + 1, d_model//2, padding_idx=0)
         ### 
     
     def forward(self, batched_data):
@@ -129,30 +132,41 @@ class ItemNodeEncoder(nn.Module):
         degree_embedding = self.degree_encoder(degree)
         # print(degree_embedding.shape)
 
-        input_embedding = item_embedding + degree_embedding
+        input_embedding = torch.cat([item_embedding, degree_embedding], dim=-1)
+        # input_embedding = item_embedding + degree_embedding
         ### Ablation study: no degree embedding
 
         return input_embedding
     
+# [FIXME] user bias + rating embedding
 class RatingEncoder(nn.Module):
     """
     Encoder item's rating information to dense representation, using `batched_data['rating']`.
     """
-    def __init__(self, num_heads):
+    def __init__(self, num_nodes, d_model):
         super(RatingEncoder, self).__init__()
 
         # TODO: Use embedding table later? embedding shape [num_rating, d_model] ?
-        self.num_heads = num_heads
+        self.user_bias = nn.Embedding(num_nodes+1, d_model//2) # 0 : cold start user
+        self.rating = nn.Embedding(6, d_model//2, padding_idx=0) # 0(no rating) : user bias only
 
     def forward(self, batched_data):
         """
         batched_data: batched data from DataLoader
         """
+        # [FIXME] explicit rating prediction에서 implicit rating을 정답값으로 사용하는 것도 말이 안됨
+        user_id = batched_data["user_seq"] # bs x u
+        item_rating = batched_data['item_rating'] # bs x u x i
+        user_bias = self.user_bias(user_id)
+        rating_bias = torch.sum(self.rating(item_rating), dim=2)
+        # attn_bias = item_rating.expand(-1,self.num_heads,-1,-1)
+        rating_embedding = torch.cat([user_bias, rating_bias], dim=-1) # bs x seq_len x d_model
+        # rating_embedding = (user_bias + rating_bias) 
 
         # [batch_size, seq_length_user, seq_length_item] 
         ###### FIXME: 정답인 rating 정보를 바로 주는건 말이 X. 따라서 상호작용 여부(0 or 1)로 주자.       
-        item_rating = batched_data['item_rating']
-        item_rating = torch.where(item_rating == 0, 0, 1)
+        # item_rating = batched_data['item_rating']
+        # item_rating = torch.where(item_rating == 0, 0, 1)
         ######
 
         # Q*K^T 를 수행하면 [batch_size, num_heads, seq_length_item, seg_length_user]
@@ -160,15 +174,20 @@ class RatingEncoder(nn.Module):
             # [batch_size, seq_length_user, seq_length_item] 
             # ==> [num_heads, batch_size, seq_length_user, seq_length_item]
             # ==> [batch_size, seq_length_user, seq_length_item, num_heads]
-        attn_bias = item_rating.repeat(self.num_heads, 1, 1, 1).permute(1, 2, 3, 0)
+        # attn_bias = item_rating.repeat(self.num_heads, 1, 1, 1).permute(1, 2, 3, 0)
+
+        return rating_embedding
+
+
+class RatingBias(nn.Module):
+    def __init__(self, num_heads):
+        super(RatingBias, self).__init__()
+        self.num_heads = num_heads
+
+    def forward(self, batched_data):
+        item_rating = batched_data['item_rating']
+        bs,u,i = item_rating.size()
+        item_rating = item_rating.view(bs,1,i,u)
+        attn_bias = item_rating.expand(-1, self.num_heads, -1, -1)
 
         return attn_bias
-
-
-# if __name__ == "__main__":
-#     import os
-
-#     data_path = os.getcwd() + '/dataset/ciao'
-#     spd_file = 'shortest_path_result.npy'
-#     a = SpatialEncoder(data_path=data_path, spd_file=spd_file, num_heads=2)
-#     print(a)

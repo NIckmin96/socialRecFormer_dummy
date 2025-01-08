@@ -60,7 +60,8 @@ class Encoder(nn.Module):
 
         # Spatial Encoding [TODO] attn_bias 만드는 과정에서 불필요한 permutation 제거
             # [batch_size, seq_length, seq_length, num_heads] ==> [batch_size, num_heads, seq_length, seq_length]
-        attn_bias = self.spatial_pos_bias(batched_data).permute(0, 3, 2, 1)
+        # attn_bias = self.spatial_pos_bias(batched_data).permute(0, 3, 2, 1)
+        attn_bias = self.spatial_pos_bias(batched_data)
 
         ### Ablation study: No attn_bias
         #attn_bias = None

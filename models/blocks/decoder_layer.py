@@ -39,11 +39,8 @@ class DecoderLayer(nn.Module):
             # self.linear = nn.Linear(d_model, 1)
             self.last_attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, last_layer_flag=True, is_dec_layer=self.dec_layer)
 
-    def forward(self, x, enc_output, trg_mask, src_mask, attn_bias):
-        # print("//////// In Decoder Layer ////////")
-        # 1. Perform self attention
-
-        # print('\n[[[[[[[[ Decoder Self Attention 시작 ]]]]]]]]')
+    def forward(self, x, rating_x, enc_output, trg_mask, src_mask, attn_bias):
+        # 1. Self-Attention
         residual = x
         x = self.norm1(x)
         x, _ = self.attention(Q=x, K=x, V=x, mask=trg_mask, attn_bias=None)
@@ -53,12 +50,12 @@ class DecoderLayer(nn.Module):
         x = self.dropout1(x)
         x = x + residual
 
-        # 3. Perform Encoder-Decoder cross attention (bias here)
+        # 3. Encoder-Decoder Cross-Attention (bias here)
         if enc_output is not None:
-            # print('\n[[[[[[[[ Cross Attention 시작 ]]]]]]]]')
             residual = x
             
             enc_output = self.norm2(enc_output)
+            enc_output = enc_output + rating_x
             x = self.norm2(x)
 
             # print("     Start cross attention....")
