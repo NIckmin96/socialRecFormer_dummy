@@ -611,7 +611,7 @@ def main():
         optimizer = optimizer,
         mode = 'min',
         factor = 0.7,
-        patience = 3,
+        patience = 2,
         min_lr = 1e-5,
         verbose = True
     )
