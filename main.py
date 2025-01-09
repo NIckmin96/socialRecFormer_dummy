@@ -270,7 +270,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
             optimizer.step()
-            lr_scheduler.step()
+            # lr_scheduler.step()
+            lr_scheduler.step(loss) # ReduceLROnPlateau
             lr_lst.append(lr_scheduler.get_last_lr())
             #optimizer.zero_grad()
 
@@ -606,19 +607,26 @@ def main():
     
 
     
-    # lr_scheduler = WarmupCosineSchedule(optimizer, warmup_steps=training_config["warmup"], t_total=total_train_samples*total_epochs)
-    
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
-        max_lr = training_config["learning_rate"],
-        # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
-        pct_start = 0.15,
-        # anneal_strategy = training_config["lr_decay"],
-        anneal_strategy = 'cos',
-        epochs = training_config["num_epochs"],
-        # steps_per_epoch = 2 * len(ds_iter['train'])
-        steps_per_epoch = len(ds_iter['train'])
+        mode = 'min',
+        factor = 0.7,
+        patience = 3,
+        min_lr = 1e-5,
+        verbose = True
     )
+    
+    # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
+    #     optimizer = optimizer,
+    #     max_lr = training_config["learning_rate"],
+    #     # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
+    #     pct_start = 0.15,
+    #     # anneal_strategy = training_config["lr_decay"],
+    #     anneal_strategy = 'cos',
+    #     epochs = training_config["num_epochs"],
+    #     # steps_per_epoch = 2 * len(ds_iter['train'])
+    #     steps_per_epoch = len(ds_iter['train'])
+    # )
 
     # criterion = nn.MSELoss()
 
