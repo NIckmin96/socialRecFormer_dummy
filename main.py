@@ -272,7 +272,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             optimizer.step()
             # lr_scheduler.step()
             lr_scheduler.step(loss) # ReduceLROnPlateau
-            lr_lst.append(lr_scheduler.get_last_lr())
+            # lr_lst.append(lr_scheduler.get_last_lr())
             #optimizer.zero_grad()
 
             losses.update(loss)
