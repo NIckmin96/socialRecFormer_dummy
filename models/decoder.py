@@ -68,12 +68,13 @@ class Decoder(nn.Module):
     def forward(self, batched_data, enc_output):
         # Input Encoding: Node it encoding + degree encoding
             # [batch_size, seq_length, item_length]
+        device = x.device
         x = self.input_embed(batched_data)
         rating_x = self.rating_embed(batched_data)
 
         # Generate mask for padded data
             # FIXME: 현재 데이터/task 에선 subsequent masking에 의미가 X.
-        dec_self_attn_mask = generate_attn_pad_mask(batched_data['item_list'], batched_data['item_list']).cuda()    # [batch_size, seq_len_item, seq_len_item]
+        dec_self_attn_mask = generate_attn_pad_mask(batched_data['item_list'], batched_data['item_list']).to(device)    # [batch_size, seq_len_item, seq_len_item]
         # print('\n<<<<<<<<<< Decoder의 self attention pad mask >>>>>>>>>>')
         # print(dec_self_attn_mask[0][:][0].data)
         # print(dec_self_attn_mask[0][:][0].shape)
@@ -87,7 +88,7 @@ class Decoder(nn.Module):
         # trg_mask = torch.gt((dec_self_attn_mask + dec_self_attn_subsequent_mask), 0)    # [batch_size, seq_len_item, seq_len_item]
         #trg_mask = dec_self_attn_mask
 
-        dec_enc_mask = generate_attn_pad_mask(batched_data['item_list'], batched_data['user_seq']).cuda() # [batch_size, seq_len_item, seq_len_user]
+        dec_enc_mask = generate_attn_pad_mask(batched_data['item_list'], batched_data['user_seq']).to(device) # [batch_size, seq_len_item, seq_len_user]
         #src_mask = dec_enc_mask     
 
         # del dec_self_attn_mask, dec_self_attn_subsequent_mask, dec_enc_mask
