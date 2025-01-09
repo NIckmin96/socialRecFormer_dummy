@@ -68,8 +68,8 @@ class Decoder(nn.Module):
     def forward(self, batched_data, enc_output):
         # Input Encoding: Node it encoding + degree encoding
             # [batch_size, seq_length, item_length]
-        device = x.device
         x = self.input_embed(batched_data)
+        device = x.device
         rating_x = self.rating_embed(batched_data)
 
         # Generate mask for padded data
