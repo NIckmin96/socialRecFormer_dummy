@@ -612,7 +612,7 @@ def main():
         mode = 'min',
         factor = 0.4,
         patience = 2,
-        min_lr = 5e-7,
+        # min_lr = 5e-7,
         verbose = True
     )
     
