@@ -11,7 +11,7 @@ class Decoder(nn.Module):
     Decoder for modeling item representation (in user-item graph),
     and perform rating prediction
     """
-    def __init__(self, num_item, max_degree, d_model, d_ffn, num_heads, dropout, num_layers):
+    def __init__(self, num_user, num_item, max_degree, d_model, d_ffn, num_heads, dropout, num_layers):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -45,12 +45,8 @@ class Decoder(nn.Module):
                 is_dec_layer = True
             ) for _ in range(num_layers)]
         )
-        
-        self.rating_embed = RatingEncoder(
-            num_nodes = self.num_item,
-            d_model = d_model
-        )
 
+        self.rating_embed = RatingEncoder(num_user, num_item, d_model)
         self.relation_bias = RatingBias(num_heads=num_heads)
 
         # rating prediction layer
@@ -68,9 +64,9 @@ class Decoder(nn.Module):
     def forward(self, batched_data, enc_output):
         # Input Encoding: Node it encoding + degree encoding
             # [batch_size, seq_length, item_length]
-        x = self.input_embed(batched_data)
-        device = x.device
+        x = self.input_embed(batched_data) # bs x seq_len_item x d_model
         rating_x = self.rating_embed(batched_data)
+        device = x.device
 
         # Generate mask for padded data
             # FIXME: 현재 데이터/task 에선 subsequent masking에 의미가 X.

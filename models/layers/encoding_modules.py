@@ -19,13 +19,13 @@ class SocialNodeEncoder(nn.Module):
         # node id embedding table -> similar to word embedding table.
             # table size: [num_user_total + 1, embed_dim]
             # (id == index + 1)
-        self.node_encoder = nn.Embedding(num_nodes + 1, d_model, padding_idx=0)
+        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2, padding_idx=0)
 
         ### Ablation study: no degree embedding
         # Degree embedding table -> will be index by input's degree information.
             # table size: [max_degree + 1, embed_dim]
             # (id == index + 1)
-        self.degree_encoder = nn.Embedding(max_degree + 1, d_model, padding_idx=0)
+        self.degree_encoder = nn.Embedding(max_degree + 1, d_model//2, padding_idx=0)
         ###
     
     def forward(self, batched_data):
@@ -50,7 +50,8 @@ class SocialNodeEncoder(nn.Module):
         degree_embedding = self.degree_encoder(degree)
         # print(degree_embedding.shape)
 
-        input_embedding = user_embedding + degree_embedding
+        # input_embedding = user_embedding + degree_embedding
+        input_embedding = torch.cat([user_embedding, degree_embedding], dim=-1)
         ### Ablation study: no degree embedding
 
         return input_embedding
@@ -143,12 +144,15 @@ class RatingEncoder(nn.Module):
     """
     Encoder item's rating information to dense representation, using `batched_data['rating']`.
     """
-    def __init__(self, num_nodes, d_model):
+    def __init__(self, num_nodes, num_items, d_model):
         super(RatingEncoder, self).__init__()
 
         # TODO: Use embedding table later? embedding shape [num_rating, d_model] ?
+        self.num_nodes = num_nodes
+        self.num_items = num_items
         self.user_bias = nn.Embedding(num_nodes+1, d_model//2) # 0 : cold start user
         self.rating = nn.Embedding(6, d_model//2, padding_idx=0) # 0(no rating) : user bias only
+        self.rating_fc = nn.Linear(num_items, d_model//2)
 
     def forward(self, batched_data):
         """
@@ -157,8 +161,18 @@ class RatingEncoder(nn.Module):
         # [FIXME] explicit rating prediction에서 implicit rating을 정답값으로 사용하는 것도 말이 안됨
         user_id = batched_data["user_seq"] # bs x u
         item_rating = batched_data['item_rating'] # bs x u x i
+        device = user_id.device
+
+        bs,u,i = item_rating.size()
+        if i != self.num_items:
+            index = torch.stack([torch.arange(i) for _ in range(u)])
+            index = torch.stack([index for _ in range(bs)]).to(device)
+            item_rating = torch.zeros(bs, u, self.num_items, dtype=item_rating.dtype, device=device).scatter(-1,index,item_rating) # num item 사이즈 맞추고 부족한 부분 zero padding
+            item_rating = item_rating.float()
+
         user_bias = self.user_bias(user_id)
-        rating_bias = torch.sum(self.rating(item_rating), dim=2)
+        rating_bias = self.rating_fc(item_rating)
+        # rating_bias = torch.sum(self.rating(item_rating), dim=2)
         # attn_bias = item_rating.expand(-1,self.num_heads,-1,-1)
         rating_embedding = torch.cat([user_bias, rating_bias], dim=-1) # bs x seq_len x d_model
         # rating_embedding = (user_bias + rating_bias) 
@@ -186,8 +200,9 @@ class RatingBias(nn.Module):
 
     def forward(self, batched_data):
         item_rating = batched_data['item_rating']
-        bs,u,i = item_rating.size()
-        item_rating = item_rating.view(bs,1,i,u)
+        # bs,u,i = item_rating.size()
+        item_rating = item_rating.permute(0,2,1) # bs x i x u
+        item_rating = item_rating.unsqueeze(1) # bs x 1 x i x u
         attn_bias = item_rating.expand(-1, self.num_heads, -1, -1)
 
         return attn_bias

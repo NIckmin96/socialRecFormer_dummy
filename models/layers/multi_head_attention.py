@@ -25,26 +25,6 @@ class ScaledDotProductAttention(nn.Module):
         score = torch.matmul(Q, K_T) / math.sqrt(d_tensor)
             # ==> [batch_size, num_heads, seq_length, seq_length]
         # print(f"////// After Q*KT: {score.shape}")
-        loss = 0
-        if attn_bias is not None:
-            # score += attn_bias
-            if is_dec_layer: 
-                # [FIXME] implicit rating에 대해서 1/0을 예측하고 학습 -> mae가 아니라 bce loss가 적절하지 않나
-                # [FIXME] 하지만, 현재는 1/0에 대한 확률을 ouptut으로 계산하는 것이 아니라, 값 자체를 계산하고 있음
-                # [FIXME] Implicit rating을 기준으로 학습을 진행할거라면, 수정하는 것이 좋아보임
-                
-                #score *= attn_bias  # decoder cross-attention 연산 시엔 mul -> 상호작용 하지 않은 item은 제외
-                # attn_bias = torch.where(attn_bias == 0, -1, 1) # attn bias = rating(implicit)
-                # score = torch.where(attn_bias==0, 0.0, score.double()) # 0인 부분 Loss계산에서 제외
-                loss = torch.sqrt(F.mse_loss(torch.where(attn_bias==0, 0.0, score.double()).float(), attn_bias.float())) / torch.sum(attn_bias!=0).item()
-                # loss = torch.mean(torch.abs((torch.sign(score.float()) - torch.sign(attn_bias.float())))) #/ (batch_size*head*30*200)
-                
-            else:
-                # score += attn_bias  # encoder self-attention 연산 시엔 add -> bias term 추가     
-                #score += self.spd_param
-                
-                attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double()) # attn_bias = spd(user distance)
-                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
 
         # 2. Apply attention mask
         if mask is not None:
@@ -55,6 +35,31 @@ class ScaledDotProductAttention(nn.Module):
         # 3. Apply attention bias (spatial encoding)
         # TODO: add attention bias before softmax
             # [batch_size, num_head, seq_length, seq_length]
+        loss = 0
+        if attn_bias is not None:
+            # score += attn_bias
+            if is_dec_layer: 
+                # [FIXME] implicit rating에 대해서 1/0을 예측하고 학습 -> mae가 아니라 bce loss가 적절하지 않나
+                # [FIXME] 하지만, 현재는 1/0에 대한 확률을 ouptut으로 계산하는 것이 아니라, 값 자체를 계산하고 있음
+                # [FIXME] Implicit rating을 기준으로 학습을 진행할거라면, 수정하는 것이 좋아보임
+                
+                #score *= attn_bias  # decoder cross-attention 연산 시엔 mul -> 상호작용 하지 않은 item은 제외
+                #loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*30*200)
+                #attn_bias = torch.where(attn_bias == 0, -1, 1)
+                attn_bias = torch.where(attn_bias == 0, -1, 1) # attn bias = rating(implicit)
+                loss = torch.mean(torch.abs((torch.sign(score.float()) - torch.sign(attn_bias.float())))) # (batch_size*head*30*200)
+                #loss = torch.mean(torch.abs((score.float() - attn_bias.float()))) / (batch_size*head*30*200)
+                #print(loss)
+                #loss = 0
+            else:
+                # score += attn_bias  # encoder self-attention 연산 시엔 add -> bias term 추가     
+                #score += self.spd_param
+                
+                attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double()) # attn_bias = spd(user distance)
+                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
+                
+                #loss = 0
+                #score += attn_bias
 
         ### Decoder 마지막 layer에서 Q * K.T 한 결과를 output으로 출력
         if last_layer_flag:
