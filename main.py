@@ -515,6 +515,11 @@ def main():
 
     if device=='cpu': 
         raise DeviceError
+    # tmp
+    elif torch.cuda.device_count()>1:
+        device = torch.device('cuda:2')
+    else:
+        device = torch.device('cuda:0')
     
     print(f"GPU index: {device.index}")
     print("\n")
