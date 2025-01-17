@@ -615,10 +615,10 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.5,
+        factor = 0.75,
         patience = 2,
         threshold = 1e-2,
-        # min_lr = 5e-7,
+        min_lr = 1e-6,
         verbose = True
     )
     
