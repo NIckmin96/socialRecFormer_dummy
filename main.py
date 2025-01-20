@@ -59,7 +59,7 @@ class AverageMeter(object):
 
 #     return loss
 
-def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt):
+def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt, lr_scheduler):
     # val_rmse = []
     # val_mae = []
     criterion = nn.MSELoss()
@@ -107,14 +107,13 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             loss += dec_loss
             
             eval_losses.update(loss)
+            lr_scheduler.step(loss)
             
             # 실제 rating matrix에서 0이 아닌 부분(실제 매긴 rating)과만 loss를 계산
                 # -> 현재 목표는 rating regression이기 때문이니까.
             # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
             # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
-            eval_losses.update(loss)
+            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean'
 
             # val_rmse.append(rmse)
             # val_mae.append(mae)
@@ -277,14 +276,14 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             losses.update(loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
-        lr_scheduler.step(loss) # ReduceLROnPlateau
+        # lr_scheduler.step(loss) # ReduceLROnPlateau
             
         # print(np.max(np.array(lr_lst)), np.min(np.array(lr_lst)), np.mean(np.array(lr_lst)))
         # validation
         end.record()
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
-        valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
+        valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt, lr_scheduler)
         model.train()
         start.record()
 
@@ -388,6 +387,7 @@ def eval(model, ds_iter):
         mse = F.mse_loss(pred[msk].float(), trg[msk].float(), reduction='none')
         total_rmse = torch.sqrt(mse.mean())
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
+    parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
 
     end.record()
     torch.cuda.synchronize()
@@ -611,16 +611,18 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer = optimizer,
-        mode = 'min',
-        factor = 0.75,
-        patience = 2,
-        threshold = 1e-2,
-        min_lr = 1e-6,
-        verbose = True
-    )
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
+
+
+    # lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer = optimizer,
+    #     mode = 'min',
+    #     factor = 0.75,
+    #     patience = 2,
+    #     threshold = 1e-2,
+    #     min_lr = 1e-6,
+    #     verbose = True
+    # )
     
     # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
     #     optimizer = optimizer,
