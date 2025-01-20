@@ -610,7 +610,7 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7)
 
 
     # lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
