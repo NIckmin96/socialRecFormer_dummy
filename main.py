@@ -59,7 +59,7 @@ class AverageMeter(object):
 
 #     return loss
 
-def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt, lr_scheduler):
+def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt):
     # val_rmse = []
     # val_mae = []
     criterion = nn.MSELoss()
@@ -107,7 +107,6 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             loss += dec_loss
             
             eval_losses.update(loss)
-            lr_scheduler.step(loss)
             
             # 실제 rating matrix에서 0이 아닌 부분(실제 매긴 rating)과만 loss를 계산
                 # -> 현재 목표는 rating regression이기 때문이니까.
@@ -276,14 +275,14 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             losses.update(loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
-        # lr_scheduler.step(loss) # ReduceLROnPlateau
             
         # print(np.max(np.array(lr_lst)), np.min(np.array(lr_lst)), np.mean(np.array(lr_lst)))
         # validation
         end.record()
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
-        valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt, lr_scheduler)
+        valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
+        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
         model.train()
         start.record()
 
