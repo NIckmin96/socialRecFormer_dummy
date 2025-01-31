@@ -9,7 +9,7 @@ class DecoderLayer(nn.Module):
         fixed-length item sequences \n
         This items are interacted items of users in encoder's input random walk sequence.
     """
-    def __init__(self, d_model, d_ffn, num_heads, dropout=0.1, last_layer:bool=False, is_dec_layer:bool=True):
+    def __init__(self, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1, last_layer:bool=False, is_dec_layer:bool=True):
         super(DecoderLayer, self).__init__()
 
         self.last_layer_flag = last_layer
@@ -28,7 +28,7 @@ class DecoderLayer(nn.Module):
         if not self.last_layer_flag:
             # FFN
             self.norm3 = nn.LayerNorm(d_model)
-            self.moe = SparseMoE(d_model, d_ffn)
+            self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
             # self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
             self.dropout3 = nn.Dropout(p=dropout)
         

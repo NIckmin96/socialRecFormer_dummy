@@ -283,7 +283,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         # lr_scheduler.step(valid_loss) # ReduceLROnPlateau
-        lr_scheduler.step() # cosineannealinglr
+        lr_scheduler.step(losses.avg) # ReduceLROnPlateau
+        # lr_scheduler.step() # else
         model.train()
         start.record()
 
@@ -411,6 +412,8 @@ def get_args():
     parser.add_argument('--name', type=str, help="checkpoint model name")
     parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
     parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
+    parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
+    parser.add_argument('--topk', type=int, default=1, help="MoE number of routers")
     parser.add_argument('--lr', type=float, default=1e-4)
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
@@ -443,6 +446,10 @@ def main():
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
     model_config["num_layers_enc"] = int(math.log(args.train_augs+1)*args.num_layers_enc)
     model_config["num_layers_dec"] = int(math.log(args.train_augs+1)*args.num_layers_dec)
+    
+    # model expansion (2) : MoE topk router
+    model_config["n_experts"] = args.n_experts
+    model_config["topk"] = args.topk
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -611,18 +618,20 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
+    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular2', step_size_up=5, cycle_momentum=False, verbose=True)
+    
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
 
 
-    # lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    #     optimizer = optimizer,
-    #     mode = 'min',
-    #     factor = 0.75,
-    #     patience = 2,
-    #     threshold = 1e-2,
-    #     min_lr = 1e-6,
-    #     verbose = True
-    # )
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer = optimizer,
+        mode = 'min',
+        factor = 0.75,
+        patience = 2,
+        threshold = 1e-2,
+        min_lr = 1e-6,
+        verbose = True
+    )
     
     # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
     #     optimizer = optimizer,
