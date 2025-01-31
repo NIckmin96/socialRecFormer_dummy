@@ -41,7 +41,7 @@ class SparseMoE(nn.Module):
         super(SparseMoE, self).__init__()
         self.d_model = d_model
         self.experts = nn.ModuleList([FeedForwardNetwork(d_model, ffn_size) for _ in range(n_experts)])
-        self.router = TopkRouter(d_model)
+        self.router = TopkRouter(d_model=d_model, n_experts=n_experts, topk=topk)
         
         
     def forward(self,x):
