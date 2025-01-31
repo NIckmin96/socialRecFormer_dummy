@@ -419,7 +419,7 @@ def get_args():
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
-    parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
+    parser.add_argument('--train_augs', type=int, default=1, help="how many times augment train data per anchor user")    
     parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     
@@ -611,7 +611,9 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
+    lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular2', step_size_up=5, cycle_momentum=False, verbose=True)
+    
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
 
 
     # lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
