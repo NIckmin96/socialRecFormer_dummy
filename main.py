@@ -282,8 +282,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
-        # lr_scheduler.step(valid_loss) # ReduceLROnPlateau
-        lr_scheduler.step(losses.avg) # ReduceLROnPlateau
+        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
+        # lr_scheduler.step(losses.avg) # ReduceLROnPlateau
         # lr_scheduler.step() # else
         model.train()
         start.record()
@@ -618,7 +618,7 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular2', step_size_up=5, cycle_momentum=False, verbose=True)
+    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular', step_size_up=5, cycle_momentum=False, verbose=True)
     
     # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
 
