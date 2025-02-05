@@ -21,6 +21,7 @@ class Transformer(nn.Module):
         )
 
         self.decoder = Decoder(
+            num_user=num_user,
             num_item=num_item,
             max_degree=max_degree_item,
             d_model=d_model,

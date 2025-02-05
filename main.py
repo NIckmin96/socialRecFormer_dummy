@@ -112,9 +112,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
                 # -> 현재 목표는 rating regression이기 때문이니까.
             # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
             # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
-            eval_losses.update(loss)
+            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean'
 
             # val_rmse.append(rmse)
             # val_mae.append(mae)
@@ -285,6 +283,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
+        # lr_scheduler.step() # cosineannealinglr
         model.train()
         start.record()
 
@@ -388,6 +387,7 @@ def eval(model, ds_iter):
         mse = F.mse_loss(pred[msk].float(), trg[msk].float(), reduction='none')
         total_rmse = torch.sqrt(mse.mean())
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
+    parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
 
     end.record()
     torch.cuda.synchronize()
@@ -515,6 +515,11 @@ def main():
 
     if device=='cpu': 
         raise DeviceError
+    # tmp
+    elif torch.cuda.device_count()>1:
+        device = torch.device('cuda:2')
+    else:
+        device = torch.device('cuda:0')
     
     print(f"GPU index: {device.index}")
     print("\n")
@@ -606,13 +611,16 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
+
+
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
         factor = 0.5,
         patience = 2,
-        # min_lr = 5e-7,
+        threshold = 1e-2,
+        min_lr = 1e-6,
         verbose = True
     )
     
