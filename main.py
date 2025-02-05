@@ -277,7 +277,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             losses.update(loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
-        lr_scheduler.step(loss) # ReduceLROnPlateau
             
         # print(np.max(np.array(lr_lst)), np.min(np.array(lr_lst)), np.mean(np.array(lr_lst)))
         # validation
@@ -285,6 +284,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
+        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
         model.train()
         start.record()
 
