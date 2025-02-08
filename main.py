@@ -268,15 +268,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
             optimizer.step()
-            # lr_scheduler.step()
-            # lr_lst.append(lr_scheduler.get_last_lr())
-            #optimizer.zero_grad()
+            optimizer.zero_grad()
 
             losses.update(loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
-        # print(np.max(np.array(lr_lst)), np.min(np.array(lr_lst)), np.mean(np.array(lr_lst)))
         # validation
         end.record()
         torch.cuda.synchronize()
@@ -625,9 +622,9 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.5,
-        patience = 2,
-        threshold = 1e-2,
+        factor = 0.8,
+        patience = 3,
+        threshold = 5e-2,
         min_lr = 1e-6,
         verbose = True
     )
