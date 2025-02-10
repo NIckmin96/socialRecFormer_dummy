@@ -414,13 +414,14 @@ def get_args():
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
     parser.add_argument('--data_seed', type=int, default=42)
-    parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
+    parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
     parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
+    parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
     args = parser.parse_args()
     return args
@@ -550,29 +551,29 @@ def main():
     # regenerate 여부 확인
     if args.regenerate:
         print("Re-Creating Datatset...")
-        if args.test_augs:
-            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
-        else:
-            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
-        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
+    else:
+        print("Loading Datatset...")
+    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
 
     # 1. file path check(train_augs & test_augs)
     train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                               f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
-    valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
+    # valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+    #                           f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
     if args.test_augs:
+        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                                 f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
     else:
+        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                                 f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
     
-    print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+    # print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
     print("\n")
-    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
+    # data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
     total_train = data_making.total_train
-    total_valid = data_making.total_valid
+    # total_valid = data_making.total_valid
     total_test = data_making.total_test
         
     # print(total_train.shape)
@@ -583,13 +584,15 @@ def main():
         
 
     train_ds = MyDataset(total_train)
-    valid_ds = MyDataset(total_valid)
+    # valid_ds = MyDataset(total_valid)
     test_ds = MyDataset(total_test)
     
 
     # train_ds = MyDataset(dataset=args.dataset, split='train', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params, train_augs=args.train_augs)
     # test_ds = MyDataset(dataset=args.dataset, split='test', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params)
 
+    # batch size update
+    training_config["batch_size"] = args.bs
     ds_iter = {
             # "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=8),
             "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
@@ -614,7 +617,7 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    # # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular', step_size_up=5, cycle_momentum=False, verbose=True)
+    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular', step_size_up=5, cycle_momentum=False, verbose=True)
     
     # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
 
@@ -641,14 +644,12 @@ def main():
     #     steps_per_epoch = len(ds_iter['train'])
     # )
 
-    # criterion = nn.MSELoss()
 
     ### TensorBoard writer preparation ###
     writer = SummaryWriter(os.path.join(log_dir,f"{args.name}.tensorboard"))
     ### train ###
     if args.mode == 'train':
         train(model, optimizer, lr_scheduler, ds_iter, training_config, writer)
-        # train(model, optimizer, ds_iter, training_config, criterion)
 
     # Since train logging is done by TensorBoard, log only test result.
     log_path = os.path.join(log_dir,'{}.{}.log'.format(args.mode, args.name))

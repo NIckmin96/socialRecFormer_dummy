@@ -119,60 +119,63 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
 
     return rating_df, trust_df
 
-def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42):
+def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42, regenerate=False):
     """
     Split rating.csv file into train/valid/test.
     
     Args:
         data_path: Path to dataset (ciao or epinions)
-        test: percentage of test & valid dataset (default: 10%)
+        test: percentage of test & valid dataset (default: 20%)
         seed: random seed (default=42)
     """
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
-    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    # valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
-    if os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path):
+    # if os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path):
+    if os.path.isfile(train_path)&os.path.isfile(test_path) and (not regenerate):
+        print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
-        rating_valid_set = pd.read_csv(valid_path)
+        # rating_valid_set = pd.read_csv(valid_path)
         rating_test_set = pd.read_csv(test_path)
         
     else:
+        print("Creating Rating split sets...")
         rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
         ### train test split TODO: Change equation for split later on    
         split_rating_df = shuffle(rating_df, random_state=seed)
-
-        num_test = int(len(split_rating_df) * test)
+        num_test = int(len(rating_df) * test)
         
         rating_test_set = split_rating_df.iloc[:num_test]
-        rating_valid_set = split_rating_df.iloc[num_test:2 * num_test]
-        rating_train_set = split_rating_df.iloc[2 * num_test:]
+        # rating_valid_set = split_rating_df.iloc[num_test:2 * num_test]
+        rating_train_set = split_rating_df.iloc[2*num_test:]
 
         rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
-        rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
+        # rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
 
-        print(f"data split finished, seed: {seed}")
+    print(f"# of train unique users : {rating_train_set.user_id.nunique()} / # of test unique users : {rating_test_set.user_id.nunique()}")
+    print(f"data split finished, seed: {seed}")
+    # return rating_train_set, rating_valid_set, rating_test_set
+    return rating_train_set, rating_test_set
 
-    return rating_train_set, rating_valid_set, rating_test_set
-
-def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, seed:int=42):
+def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, seed:int=42, regenerate=False):
     """
     Generate social graph from train/test/validation dataset
     """
     split_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
-    if not os.path.isfile(split_file):
+    if not os.path.isfile(split_file) or regenerate:
         trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
         social_split = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
         # save
-        social_split.to_csv(data_path + f'/trustnetwork_{split}_seed_{seed}.csv')    
+        social_split.to_csv(split_file)
     else:
         social_split = pd.read_csv(split_file)
     
     return social_split
 
-def generate_user_degree_table(data_path:str, trust_split, split:str='train', seed:int=42) -> pd.DataFrame:
+def generate_user_degree_table(data_path:str, trust_split, split:str='train', seed:int=42, regenerate=False) -> pd.DataFrame:
     """
     Generate & return degree table from social graph(trustnetwork).
 
@@ -182,7 +185,7 @@ def generate_user_degree_table(data_path:str, trust_split, split:str='train', se
 
     """
     user_degree_dir = data_path + f'/degree_table_social_{split}_seed_{seed}.csv'
-    if os.path.isfile(user_degree_dir):
+    if os.path.isfile(user_degree_dir) and (not regenerate):
         degree_df = pd.read_csv(user_degree_dir)
     else:
         social_graph = nx.from_pandas_edgelist(trust_split, source='user_id_1', target='user_id_2')
@@ -194,14 +197,14 @@ def generate_user_degree_table(data_path:str, trust_split, split:str='train', se
     return degree_df
 
 
-def generate_item_degree_table(data_path:str, rating_split:pd.DataFrame, split:str, seed:int=42) -> pd.DataFrame:
+def generate_item_degree_table(data_path:str, rating_split:pd.DataFrame, split:str, seed:int=42, regenerate=False) -> pd.DataFrame:
     """
     Generate & return degree table from user-item graph(rating matrix).
 
     Ciao: 7375 user // 105114 items ==> 7317 user // 104975 items (after filtered)
     """
     item_degree_dir = data_path + f'/degree_table_item_{split}_seed_{seed}.csv'
-    if os.path.isfile(item_degree_dir):
+    if os.path.isfile(item_degree_dir) and (not regenerate):
         degree_df = pd.read_csv(item_degree_dir)
     else:
         # Since using NetworkX to compute bipartite graph's degree is time-consuming(because graph is too sparse),
@@ -213,7 +216,7 @@ def generate_item_degree_table(data_path:str, rating_split:pd.DataFrame, split:s
 
     return degree_df
 
-def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, degree_table:pd.DataFrame, split:str, seed:int=42) -> pd.DataFrame:
+def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, degree_table:pd.DataFrame, split:str, seed:int=42, regenerate=False) -> pd.DataFrame:
     """
     Generate & return user's interacted items & ratings table from user-item graph(rating matrix)
 
@@ -223,7 +226,7 @@ def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, de
         seed: random seed, used in dataset split
     """
     user_item_dir = data_path + f'/user_item_interaction_{split}_seed_{seed}.csv'
-    if os.path.isfile(user_item_dir):
+    if os.path.isfile(user_item_dir) and (not regenerate):
         user_item_dataframe = pd.read_csv(user_item_dir)
     else:
         degree_table = dict(zip(degree_table['product_id'], degree_table['degree']))    # for id mapping.
@@ -319,7 +322,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
     # dataframe return 시키는 부분
     if os.path.isfile(file_path)&(not regenerate):
         print(f"Loading {split} random walk sequence file...")
-        return pd.read_csv(file_path)
+        df = pd.read_csv(file_path)
     
     else:
         user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
@@ -373,12 +376,11 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
         df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
         df = df.sort_values(by=['user_id'])
         df = df.reset_index(drop=True)
-        print(f"split : {split} / len : {len(df)}")
-        print("\n")
         df.to_csv(file_path, index=False)
 
-        return df
+    print(f"split : {split} / len : {len(df)}")
 
+    return df, file_path
 
 def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
     """
@@ -406,6 +408,37 @@ def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS): # 확�
         p=[v for v in select_probabilities.values()]
     )
     return selected_node
+
+def remove_duplicated_social_random_walk_sequence(data_path:str, random_walk_train:pd.DataFrame, random_walk_test:pd.DataFrame, train_path:str, test_path:str):
+    random_walk_train = random_walk_train.drop_duplicates('random_walk_seq')
+    random_walk_test = random_walk_test.drop_duplicates('random_walk_seq')
+    random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
+
+    random_walk_train.to_csv(train_path)
+    random_walk_test.to_csv(test_path)
+
+    return random_walk_train, random_walk_test
+
+def slice_and_pad_list(input_list:list, slice_length:int):
+        """
+        Get list, and slice it by slice length, and pad with 0.
+        """
+        num_slices = math.ceil(len(input_list) / slice_length)
+
+        # Pad input list with 0
+        input_list += [0] * (slice_length * num_slices - len(input_list))
+
+        # Create sliced & padded list
+        result_list = [input_list[i:i + slice_length] for i in range(0, len(input_list), slice_length)]
+
+        return result_list
+    
+# Load dataset & convert data type
+def str_to_list(x):
+    if type(x)==str:
+        return literal_eval(x)
+    else:
+        return x 
     
 def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, split:str, random_walk_len:int=30, item_seq_len:int=100, return_params:int=1, train_augs:int=10, test_augs:bool=False, regenerate:bool=False):
 
@@ -431,26 +464,6 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         item_degree:    선택된 아이템들의 degree 정보 (해당 아이템과 상호작용한 사용자의 수) \n
         spd_matrix:     현재 user_seq에 해당하는 사용자들의 SPD matrix (사전 생성한 전체 사용자의 SPD table에서 slicing한 matrix)
     """
-    def slice_and_pad_list(input_list:list, slice_length:int):
-        """
-        Get list, and slice it by slice length, and pad with 0.
-        """
-        num_slices = math.ceil(len(input_list) / slice_length)
-
-        # Pad input list with 0
-        input_list += [0] * (slice_length * num_slices - len(input_list))
-
-        # Create sliced & padded list
-        result_list = [input_list[i:i + slice_length] for i in range(0, len(input_list), slice_length)]
-
-        return result_list
-    
-    # Load dataset & convert data type
-    def str_to_list(x):
-        if type(x)==str:
-            return literal_eval(x)
-        else:
-            return x 
 
     spd_path = 'shortest_path_result.npy'
     # test set augmentation 여부 확인
@@ -471,63 +484,63 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         print(total_path)
         print(f"Loading {split} total df(input_sequence_data)...")
         total_df = pd.read_pickle(total_path)
-        return total_df
     
-    print(f"{split} total df(input_sequence_data) doesn't exist!")
-    print(f"Creating {split} total df(input_sequence_data)...")
-    # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
-    spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
-    # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.
-    rating_matrix = np.load(data_path + '/rating_matrix.npy')
-    
-    user_df['random_walk_seq'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
-    user_df['degree'] = user_df.apply(lambda x: str_to_list(x['degree']), axis=1)
+    else:
+        print(f"{split} total df(input_sequence_data) doesn't exist!")
+        print(f"Creating {split} total df(input_sequence_data)...")
+        # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
+        spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
+        # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.
+        rating_matrix = np.load(data_path + '/rating_matrix.npy')
+        
+        user_df['random_walk_seq'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
+        user_df['degree'] = user_df.apply(lambda x: str_to_list(x['degree']), axis=1)
 
-    item_df['product_id'] = item_df.apply(lambda x: str_to_list(x['product_id']), axis=1)
-    item_df['rating'] = item_df.apply(lambda x: str_to_list(x['rating']), axis=1)
-    item_df['product_degree'] = item_df.apply(lambda x: str_to_list(x['product_degree']), axis=1)
+        item_df['product_id'] = item_df.apply(lambda x: str_to_list(x['product_id']), axis=1)
+        item_df['rating'] = item_df.apply(lambda x: str_to_list(x['rating']), axis=1)
+        item_df['product_degree'] = item_df.apply(lambda x: str_to_list(x['product_degree']), axis=1)
 
-    # hash(dictionary)
-    user_product_dic = dict(zip(item_df['user_id'], item_df['product_id']))
-    # user_product_degree_dic = dict(zip(item_df[f'item_{split}']['user_id'], item_df[f'item_{split}']['product_degree']))
-    # product : product_degree
-    all_item, all_degree = [],[]
-    for item_list, item_degree in zip(item_df['product_id'], item_df['product_degree']):
-        all_item.extend(item_list)
-        all_degree.extend(item_degree)
+        # user_id : product_id(list)
+        user_product_dic = dict(zip(item_df['user_id'], item_df['product_id']))
+        # product_id(list) : product_degree(list)
+        all_item, all_degree = [],[]
+        for item_list, item_degree in zip(item_df['product_id'], item_df['product_degree']):
+            all_item.extend(item_list)
+            all_degree.extend(item_degree)
 
-    product_degree_dic = dict(zip(all_item, all_degree))
+        product_degree_dic = dict(zip(all_item, all_degree))
 
-    ############################################ NEW ############################################
-    # new total df creation method(based on map function)
-    tqdm.pandas()
+        ############################################ NEW ############################################
+        # new total df creation method(based on map function)
+        tqdm.pandas()
 
-    total_df = pd.DataFrame(columns=['user_id', 'user_sequences', 'user_degree', 'item_sequences', 'item_degree', 'item_rating', 'spd_matrix'])
-    # user
-    total_df['user_id'] = user_df['user_id']
-    total_df['user_sequences'] = user_df['random_walk_seq']
-    total_df['user_degree'] = user_df['degree']
-    # item
-    print("Processing Item sequences / Degrees ...")
-    total_df['item_sequences'] = total_df['user_sequences'].progress_map(lambda seq:list(map(lambda x:user_product_dic[x], seq)))
-    total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:sum(x,start=[])).map(lambda x:list(set(x)-set([0])))
-    total_df['item_degree'] = total_df['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
-    # slice item & degree
-    print("Processing Item sequences/Degrees Slicing ...")
-    total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
-    total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
-    total_df = total_df.explode(['item_sequences','item_degree']).reset_index(drop=True)
-    # print(total_df.shape)
-    # spd matrix
-    print("Processing Spd Matrix ...")
-    total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
-    # rating matrix(user-item)
-    print("Processing Rating Matrix ...")
-    print("\n")
-    total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
+        total_df = pd.DataFrame(columns=['user_id', 'user_sequences', 'user_degree', 'item_sequences', 'item_degree', 'item_rating', 'spd_matrix'])
+        # user
+        total_df['user_id'] = user_df['user_id']
+        total_df['user_sequences'] = user_df['random_walk_seq']
+        total_df['user_degree'] = user_df['degree']
+        # item
+        print("Processing Item sequences / Degrees ...")
+        total_df['item_sequences'] = total_df['user_sequences'].progress_map(lambda seq:list(map(lambda x:user_product_dic[x], seq)))
+        total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:sum(x,start=[])).map(lambda x:list(set(x)-set([0])))
+        total_df['item_degree'] = total_df['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
+        # slice item & degree
+        print("Processing Item sequences/Degrees Slicing ...")
+        total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        total_df = total_df.explode(['item_sequences','item_degree']).reset_index(drop=True)
+        # print(total_df.shape)
+        # spd matrix
+        print("Processing Spd Matrix ...")
+        total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
+        # rating matrix(user-item)
+        print("Processing Rating Matrix ...")
+        total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
 
-    with open(total_path, "wb") as file:
-        pickle.dump(total_df, file)
+        with open(total_path, "wb") as file:
+            pickle.dump(total_df, file)
+
+    print(f"# of total {split} : {len(total_df)}")    
 
     return total_df
     
