@@ -144,19 +144,21 @@ def shuffle_and_split_dataset(data_path:str, test=0.1, seed=42, regenerate=False
         rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
         ### train test split TODO: Change equation for split later on    
         split_rating_df = shuffle(rating_df, random_state=seed)
-        num_test = int(len(rating_df) * test)
-        
-        rating_test_set = split_rating_df.iloc[:num_test]
-        # rating_valid_set = split_rating_df.iloc[num_test:2 * num_test]
-        rating_train_set = split_rating_df.iloc[2*num_test:]
+        num_test = int(rating_df.user_id.nunique()*test)
+        users = rating_df.user_id.unique()
+        random.shuffle(users)
+        train_users = users[num_test:]
+        test_users = users[:num_test]
+
+        rating_test_set = split_rating_df[split_rating_df['user_id'].isin(test_users)]
+        rating_train_set = split_rating_df[split_rating_df['user_id'].isin(train_users)]
 
         rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
-        # rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
 
     print(f"# of train unique users : {rating_train_set.user_id.nunique()} / # of test unique users : {rating_test_set.user_id.nunique()}")
     print(f"data split finished, seed: {seed}")
-    # return rating_train_set, rating_valid_set, rating_test_set
+    
     return rating_train_set, rating_test_set
 
 def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, seed:int=42, regenerate=False):
