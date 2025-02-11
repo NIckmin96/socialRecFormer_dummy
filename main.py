@@ -627,7 +627,7 @@ def main():
         mode = 'min',
         factor = 0.8,
         patience = 3,
-        threshold = 5e-2,
+        threshold = 1e-2,
         min_lr = 1e-6,
         verbose = True
     )
