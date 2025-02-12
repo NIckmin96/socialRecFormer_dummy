@@ -412,7 +412,7 @@ def str_to_list(x):
     else:
         return x 
     
-def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, split:str, random_walk_len:int=30, item_seq_len:int=100, return_params:int=1, train_augs:int=10, test_augs:bool=False, regenerate:bool=False, test_user_item:dict={}):
+def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, split:str, random_walk_len:int=30, item_per_user:int=5, return_params:int=1, train_augs:int=10, test_augs:bool=False, regenerate:bool=False, test_user_item:dict={}):
 
     # if os.path.isfie(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"):
     #     print(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"+" file exists")
@@ -438,6 +438,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
     """
 
     spd_path = 'shortest_path_result.npy'
+    item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
     if split=='train':
         total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
@@ -492,14 +493,13 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         test_user_product_dict = {}
         # user당 item mapping하는 함수 + Test셋에서 사용한 조합(user-item) train셋에서 중복 제거
         def map_user_item(user):
-            items_per_user = item_seq_len//random_walk_len
             items = list(set(user_product_dic[user]) - set(test_user_item.setdefault(user,[])))
             items = list(set(items)-set([0])) # drop duplicates + 0 제외
-            if len(items)>items_per_user:
-                selected_items = np.random.choice(items, items_per_user, replace=False)
-            elif 0<len(items)<=items_per_user:
+            if len(items)>item_per_user:
+                selected_items = np.random.choice(items, item_per_user, replace=False)
+            elif 0<len(items)<=item_per_user:
                 selected_items = items
-                diff = items_per_user - len(selected_items)
+                diff = item_per_user - len(selected_items)
                 selected_items.extend(np.random.choice(items, diff))
             else:
                 selected_items = []

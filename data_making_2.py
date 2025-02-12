@@ -3,7 +3,7 @@ import argparse
 import data_utils_2 as utils
 
 class DatasetMaking:
-    def __init__(self, dataset, seed, user_seq_len, item_seq_len, return_params, train_augs, test_augs, regenerate):
+    def __init__(self, dataset, seed, user_seq_len, item_per_user, return_params, train_augs, test_augs, regenerate):
         # self.args = args
         data_path = os.getcwd() + '/dataset/' + dataset
         # create fundamental dataframe (Rating / Social)
@@ -47,7 +47,7 @@ class DatasetMaking:
         self.random_walk_train, self.random_walk_test = utils.remove_duplicated_social_random_walk_sequence(data_path, self.random_walk_train, self.random_walk_test, rw_train_path, rw_test_path)
         
         # 모델 입력을 위한 최종 데이터셋 구성
-        self.total_test, test_user_item = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_test, item_df=self.user_item_table_test, seed=seed, split='test', random_walk_len=user_seq_len, item_seq_len=item_seq_len, return_params=return_params, train_augs=train_augs, test_augs=test_augs, regenerate=regenerate)
-        self.total_train = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_train, item_df=self.user_item_table_train, seed=seed, split='train', random_walk_len=user_seq_len, item_seq_len=item_seq_len, return_params=return_params, train_augs=train_augs, test_augs=False, regenerate=regenerate, test_user_item=test_user_item)
+        self.total_test, test_user_item = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_test, item_df=self.user_item_table_test, seed=seed, split='test', random_walk_len=user_seq_len, item_per_user=item_per_user, return_params=return_params, train_augs=train_augs, test_augs=test_augs, regenerate=regenerate)
+        self.total_train = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_train, item_df=self.user_item_table_train, seed=seed, split='train', random_walk_len=user_seq_len, item_per_user=item_per_user, return_params=return_params, train_augs=train_augs, test_augs=False, regenerate=regenerate, test_user_item=test_user_item)
         # self.total_valid = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_valid, item_df=self.user_item_table_valid, seed=seed, split='valid', random_walk_len=user_seq_len, item_seq_len=item_seq_len, return_params=return_params, train_augs=train_augs, test_augs=False, regenerate=regenerate)
         

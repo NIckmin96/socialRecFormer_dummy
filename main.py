@@ -416,7 +416,7 @@ def get_args():
     parser.add_argument('--data_seed', type=int, default=42)
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
-    parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
+    parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
     parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
@@ -483,7 +483,7 @@ def main():
     name_dataset = str(args.dataset)
     name_seed = str(args.data_seed)
     name_u_len = str(args.user_seq_len)
-    name_i_len = str(args.item_seq_len)
+    name_i_len = str(args.user_seq_len*args.item_per_user)
     name_n_enc = str(model_config['num_layers_enc'])
     name_n_dec = str(model_config['num_layers_dec'])
     name_train_augs = str(args.train_augs)
@@ -553,21 +553,21 @@ def main():
         print("Re-Creating Datatset...")
     else:
         print("Loading Datatset...")
-    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
+    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_per_user, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
 
     # 1. file path check(train_augs & test_augs)
     train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
     # valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
     #                           f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
     if args.test_augs:
-        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
+        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
     else:
-        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test.pkl')
     
     # print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
     print("\n")
@@ -625,9 +625,9 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.8,
-        patience = 3,
-        threshold = 1e-2,
+        factor = 0.9,
+        patience = 7,
+        threshold = 3e-2,
         min_lr = 1e-6,
         verbose = True
     )
