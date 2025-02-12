@@ -19,13 +19,13 @@ class SocialNodeEncoder(nn.Module):
         # node id embedding table -> similar to word embedding table.
             # table size: [num_user_total + 1, embed_dim]
             # (id == index + 1)
-        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2)
+        self.node_encoder = nn.Embedding(num_nodes + 1, d_model)
 
         ### Ablation study: no degree embedding
         # Degree embedding table -> will be index by input's degree information.
             # table size: [max_degree + 1, embed_dim]
             # (id == index + 1)
-        self.degree_encoder = nn.Embedding(max_degree + 1, d_model//2, padding_idx=0)
+        self.degree_encoder = nn.Embedding(max_degree + 1, d_model, padding_idx=0)
         ###
     
     def forward(self, batched_data):
@@ -50,8 +50,8 @@ class SocialNodeEncoder(nn.Module):
         degree_embedding = self.degree_encoder(degree)
         # print(degree_embedding.shape)
 
-        # input_embedding = user_embedding + degree_embedding
-        input_embedding = torch.cat([user_embedding, degree_embedding], dim=-1)
+        input_embedding = user_embedding + degree_embedding
+        # input_embedding = torch.cat([user_embedding, degree_embedding], dim=-1)
         ### Ablation study: no degree embedding
 
         return input_embedding
@@ -105,12 +105,12 @@ class ItemNodeEncoder(nn.Module):
 
         # node id embedding table -> similar to word embedding table.
             # table size: [num_item_total, embed_dim]
-        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2)
+        self.node_encoder = nn.Embedding(num_nodes + 1, d_model)
 
         ### Ablation study: no degree embedding
         # Degree embedding table -> will be index by input's degree information
             # table size: [max_degree, embed_dim]
-        self.degree_encoder = nn.Embedding(max_degree + 1, d_model//2, padding_idx=0)
+        self.degree_encoder = nn.Embedding(max_degree + 1, d_model, padding_idx=0)
         ### 
     
     def forward(self, batched_data):
@@ -133,8 +133,8 @@ class ItemNodeEncoder(nn.Module):
         degree_embedding = self.degree_encoder(degree)
         # print(degree_embedding.shape)
 
-        input_embedding = torch.cat([item_embedding, degree_embedding], dim=-1)
-        # input_embedding = item_embedding + degree_embedding
+        # input_embedding = torch.cat([item_embedding, degree_embedding], dim=-1)
+        input_embedding = item_embedding + degree_embedding
         ### Ablation study: no degree embedding
 
         return input_embedding
