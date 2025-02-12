@@ -46,9 +46,9 @@ class ScaledDotProductAttention(nn.Module):
                 #score *= attn_bias  # decoder cross-attention 연산 시엔 mul -> 상호작용 하지 않은 item은 제외
                 #loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*30*200)
                 #attn_bias = torch.where(attn_bias == 0, -1, 1)
-                attn_bias = torch.where(attn_bias == 0, -1, 1) # attn bias = rating(implicit)
-                loss = torch.mean(torch.abs((torch.sign(score.float()) - torch.sign(attn_bias.float())))) # (batch_size*head*30*200)
-                #loss = torch.mean(torch.abs((score.float() - attn_bias.float()))) / (batch_size*head*30*200)
+                # attn_bias = torch.where(attn_bias == 0, -1, 1) # attn bias = rating(implicit)
+                # loss = torch.mean(torch.abs((torch.sign(score.float()) - torch.sign(attn_bias.float())))) # (batch_size*head*30*200)
+                loss = torch.mean(torch.abs((score.float() - attn_bias.float()))) / (batch_size*head*30*200)
                 #print(loss)
                 #loss = 0
             else:

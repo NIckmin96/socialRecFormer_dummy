@@ -19,7 +19,7 @@ class SocialNodeEncoder(nn.Module):
         # node id embedding table -> similar to word embedding table.
             # table size: [num_user_total + 1, embed_dim]
             # (id == index + 1)
-        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2, padding_idx=0)
+        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2)
 
         ### Ablation study: no degree embedding
         # Degree embedding table -> will be index by input's degree information.
@@ -105,7 +105,7 @@ class ItemNodeEncoder(nn.Module):
 
         # node id embedding table -> similar to word embedding table.
             # table size: [num_item_total, embed_dim]
-        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2, padding_idx=0)
+        self.node_encoder = nn.Embedding(num_nodes + 1, d_model//2)
 
         ### Ablation study: no degree embedding
         # Degree embedding table -> will be index by input's degree information
@@ -150,11 +150,12 @@ class RatingEncoder(nn.Module):
         # TODO: Use embedding table later? embedding shape [num_rating, d_model] ?
         self.num_nodes = num_nodes
         self.num_items = num_items
-        self.user_bias = nn.Embedding(num_nodes+1, d_model//2) # 0 : cold start user
-        self.rating = nn.Embedding(6, d_model//2, padding_idx=0) # 0(no rating) : user bias only
-        self.rating_fc = nn.Linear(num_items, d_model//2)
+        self.user_bias = nn.Embedding(num_nodes+1, d_model) # 0 : cold start user
+        # self.user_bias = SocialNodeEncoder() # 0 : cold start user
+        # self.rating = nn.Embedding(6, d_model, padding_idx=0) # 0(no rating) : user bias only
+        self.rating_fc = nn.Linear(num_items, d_model)
 
-    def forward(self, batched_data):
+    def forward(self, batched_data, is_train=True):
         """
         batched_data: batched data from DataLoader
         """
@@ -174,8 +175,11 @@ class RatingEncoder(nn.Module):
         rating_bias = self.rating_fc(item_rating)
         # rating_bias = torch.sum(self.rating(item_rating), dim=2)
         # attn_bias = item_rating.expand(-1,self.num_heads,-1,-1)
-        rating_embedding = torch.cat([user_bias, rating_bias], dim=-1) # bs x seq_len x d_model
-        # rating_embedding = (user_bias + rating_bias) 
+        # rating_embedding = torch.cat([user_bias, rating_bias], dim=-1) # bs x seq_len x d_model
+        if is_train:
+            rating_embedding = (user_bias + rating_bias)
+        else:
+            rating_embedding = user_bias
 
         # [batch_size, seq_length_user, seq_length_item] 
         ###### FIXME: 정답인 rating 정보를 바로 주는건 말이 X. 따라서 상호작용 여부(0 or 1)로 주자.       
