@@ -563,7 +563,7 @@ def main():
         optimizer = optimizer,
         mode = 'min',
         factor = 0.9,
-        patience = 5,
+        patience = 4,
         threshold = 3e-2,
         min_lr = 1e-6,
         verbose = True
