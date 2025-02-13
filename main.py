@@ -81,7 +81,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             batch['item_rating'] = batch['item_rating'].to(device)
             batch['spd_matrix'] = batch['spd_matrix'].to(device)
 
-            outputs, enc_loss, dec_loss = model(batch)
+            outputs, enc_loss, dec_loss = model(batch, is_train=False)
 
             # loss = criterion(outputs.float(), batch['item_rating'].float())
             # FIXME:
@@ -171,7 +171,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
         else:
             update_cnt += 1
 
-    return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
+    # return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
+    return eval_losses.val, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
@@ -336,7 +337,7 @@ def eval(model, ds_iter):
             batch['item_degree'] = batch['item_degree'].to(device)
             batch['item_rating'] = batch['item_rating'].to(device)
             batch['spd_matrix'] = batch['spd_matrix'].to(device)
-            outputs, enc_loss, dec_loss = model(batch)
+            outputs, enc_loss, dec_loss = model(batch, is_train=False)
 
             # loss = criterion(outputs.float(), batch['item_rating'].float())
             # FIXME: 
@@ -415,7 +416,6 @@ def get_args():
     parser.add_argument('--lr', type=float, default=1e-4)
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
-    parser.add_argument('--data_seed', type=int, default=42)
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
@@ -460,7 +460,6 @@ def main():
 
     ###  set the random seeds for deterministic results. ####
     SEED = args.seed
-    #SEED = 42
     random.seed(SEED)
     torch.manual_seed(SEED)
     torch.backends.cudnn.deterministic = True
@@ -483,7 +482,7 @@ def main():
         os.makedirs(checkpoint_dir)
     
     name_dataset = str(args.dataset)
-    name_seed = str(args.data_seed)
+    name_seed = str(args.seed)
     name_u_len = str(args.user_seq_len)
     name_i_len = str(args.user_seq_len*args.item_per_user)
     name_n_enc = str(model_config['num_layers_enc'])
@@ -494,16 +493,7 @@ def main():
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
-    """if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print("model loaded from: " + checkpoint_path)"""
-
-
-    #model = model.cuda()
     print(model)
-    # print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
-    # print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
 
     # gpu device선택
     device_ids = list(range(torch.cuda.device_count()))
@@ -531,7 +521,6 @@ def main():
     print("\n")
     
     model = model.to(device)
-    # model = model.cuda()
 
     ######################################################### data preparation #########################################################
 
@@ -563,35 +552,26 @@ def main():
     # valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
     #                           f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
     if args.test_augs:
-        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
+        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}\n \
+            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                                 f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
     else:
-        print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n \
+            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
                                 f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test.pkl')
     
-    # print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+    # print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
     print("\n")
     # data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
     total_train = data_making.total_train
     # total_valid = data_making.total_valid
-    total_test = data_making.total_test
-        
-    # print(total_train.shape)
-    # print(total_test.shape)
-    # print(total_valid.shape)
-
-        # del data_making # for memory capacity
-        
+    total_test = data_making.total_test        
 
     train_ds = MyDataset(total_train)
     # valid_ds = MyDataset(total_valid)
     test_ds = MyDataset(total_test)
-    
-
-    # train_ds = MyDataset(dataset=args.dataset, split='train', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params, train_augs=args.train_augs)
-    # test_ds = MyDataset(dataset=args.dataset, split='test', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params)
 
     # batch size update
     training_config["batch_size"] = args.bs
@@ -628,7 +608,7 @@ def main():
         optimizer = optimizer,
         mode = 'min',
         factor = 0.9,
-        patience = 7,
+        patience = 5,
         threshold = 3e-2,
         min_lr = 1e-6,
         verbose = True
@@ -661,9 +641,7 @@ def main():
 
     print(json.dumps([model_config, training_config], indent = 4))
 
-    print(model)
-    #print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
-    #print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
+    # print(model)
 
     ### eval ###
     print(checkpoint_path)
