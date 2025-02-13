@@ -77,4 +77,4 @@ class Encoder(nn.Module):
         del src_mask, attn_bias
         # x: [batch_size, seq_length, d_model]
             # src_mask will be used in encoder-decoder cross attention.
-        return x, sum(losses)/len(losses)
+        return x, sum(losses)/len(losses), self.input_embed.node_encoder # dev

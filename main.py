@@ -172,7 +172,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             update_cnt += 1
 
     # return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
-    return eval_losses.val, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
+    return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae

@@ -36,9 +36,9 @@ class Transformer(nn.Module):
         )
     
     def forward(self, batched_data, is_train=True):
-        enc_output, enc_loss = self.encoder(batched_data)
+        enc_output, enc_loss, user_embed = self.encoder(batched_data) # dev
         # print(f"############### Enc end... {enc_output.shape} and {src_mask.shape} ###############")
-        output, dec_loss = self.decoder(batched_data, enc_output, is_train)
+        output, dec_loss = self.decoder(batched_data, enc_output, user_embed, is_train)
 
         # [batch_size, seq_leng_item, seq_len_user]
         # ==> [batch_size, seq_len_user, seq_len_item]

@@ -155,7 +155,7 @@ class RatingEncoder(nn.Module):
         # self.rating = nn.Embedding(6, d_model, padding_idx=0) # 0(no rating) : user bias only
         self.rating_fc = nn.Linear(num_items, d_model)
 
-    def forward(self, batched_data, is_train=True):
+    def forward(self, batched_data, user_embed, is_train=True):
         """
         batched_data: batched data from DataLoader
         """
@@ -171,7 +171,8 @@ class RatingEncoder(nn.Module):
             item_rating = torch.zeros(bs, u, self.num_items, dtype=item_rating.dtype, device=device).scatter(-1,index,item_rating) # num item 사이즈 맞추고 부족한 부분 zero padding
             item_rating = item_rating.float()
 
-        user_bias = self.user_bias(user_id)
+        # user_bias = self.user_bias(user_id)
+        user_bias = user_embed(user_id) # dev
         rating_bias = self.rating_fc(item_rating)
         # rating_bias = torch.sum(self.rating(item_rating), dim=2)
         # attn_bias = item_rating.expand(-1,self.num_heads,-1,-1)

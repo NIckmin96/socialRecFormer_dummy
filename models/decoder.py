@@ -63,11 +63,11 @@ class Decoder(nn.Module):
 
         self.relu = nn.ReLU()
     
-    def forward(self, batched_data, enc_output, is_train):
+    def forward(self, batched_data, enc_output, user_embed, is_train):
         # Input Encoding: Node it encoding + degree encoding
             # [batch_size, seq_length, item_length]
         x = self.input_embed(batched_data) # bs x seq_len_item x d_model
-        rating_x = self.rating_embed(batched_data, is_train)
+        rating_x = self.rating_embed(batched_data, user_embed, is_train)
         device = x.device
 
         # Generate mask for padded data
