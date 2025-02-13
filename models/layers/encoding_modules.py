@@ -198,15 +198,18 @@ class RatingEncoder(nn.Module):
 
 
 class RatingBias(nn.Module):
-    def __init__(self, num_heads):
+    def __init__(self, num_heads, rating_cut=3):
         super(RatingBias, self).__init__()
         self.num_heads = num_heads
+        # dev
+        self.rating_cut = rating_cut
 
     def forward(self, batched_data):
         item_rating = batched_data['item_rating']
-        # bs,u,i = item_rating.size()
         item_rating = item_rating.permute(0,2,1) # bs x i x u
         item_rating = item_rating.unsqueeze(1) # bs x 1 x i x u
         attn_bias = item_rating.expand(-1, self.num_heads, -1, -1)
+        # dev
+        attn_bias = torch.where(attn_bias<self.rating_cut, 0, 1) 
 
         return attn_bias

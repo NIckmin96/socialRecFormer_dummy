@@ -222,51 +222,28 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             outputs, enc_loss, dec_loss = model(batch)
 
             # compute loss
-            # FIXME: 
-                # 현재 target(batch['item_rating'])은 0이 많이 포함되어 있는 sparse한 rating matrix로, shape가 [seq_len_user, seq_len_item] (batch dim 제외)
-                # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
-                # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
-                # 따라서 Masked MSELoss를 사용
-                
-            # loss = criterion(outputs.float(), batch['item_rating'].float())
-
-
-            
+                        
             ####### dec_loss
             mask = (batch['item_rating'] != 0)
-            # abs_diff = torch.abs(outputs - batch['item_rating'])*mask
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             org_loss = torch.sum(squared_diff) / torch.sum(mask)
             org_loss = torch.sqrt(org_loss) # RMSE
 
-            ########## new_loss ?
-            
-            #mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            #rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
-            #loss = criterion(outputs[mask].float(),batch['item_rating'][mask].float()).cuda()
-            #print(outputs.shape)
             batch['item_rating'] = batch['item_rating'][:,0] 
             outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            #print(outputs.shape)
             
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             new_loss = torch.sum(squared_diff) / torch.sum(mask)
 
             # loss =  org_loss + new_loss * training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"] 
+            
+            # [ORG]
             loss = org_loss*training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"]
-
-            #loss = loss + spd_loss + new_loss
             
+            # [DEV]
+            # loss = org_loss*training_config["alpha"] + enc_loss * training_config["beta"] 
             loss.backward()
-            
-            # print(loss)
-            # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
             optimizer.step()
@@ -287,19 +264,15 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         start.record(stream)
 
         # Tensorboard recording
-        # writer.add_scalar('Loss/Train', losses.avg, epoch)
-        # writer.add_scalar('Loss/Valid', valid_loss, epoch)
-        #writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss, 'Org':org_losses.avg, 'SPD':spd_losses.avg, 'new':new_losses.avg}, epoch)
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
-        # if best_dev_mae < 0.81:
-        #     break
         if epoch > 100:
             break
-        if update_cnt > 10:
+        # if update_cnt > 10:
+        if update_cnt > 20: # dev
             break
     writer.close()
 
@@ -339,35 +312,20 @@ def eval(model, ds_iter):
             batch['spd_matrix'] = batch['spd_matrix'].to(device)
             outputs, enc_loss, dec_loss = model(batch, is_train=False)
 
-            # loss = criterion(outputs.float(), batch['item_rating'].float())
             # FIXME: 
                 # 현재 target(batch['item_rating'])은 0이 많이 포함되어 있는 sparse한 rating matrix로, shape가 [seq_len_user, seq_len_item] (batch dim 제외)
                 # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
                 # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
                 # 따라서 Masked MSELoss를 사용
                 # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산하게 된다.
-            #print(batch['item_rating'].shape)
             batch['item_rating'] = batch['item_rating'][:,0] 
-            outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            
+            outputs = outputs[:,0]            
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             loss = torch.sum(squared_diff) / torch.sum(mask)
             loss += enc_loss
-            loss += dec_loss
-            
-            # eval_losses.update(loss.mean())
+            # loss += dec_loss
             eval_losses.update(loss)
-            
-            # 실제 rating matrix에서 0이 아닌 부분(실제 매긴 rating)과만 loss를 계산
-                # -> 현재 목표는 rating regression이기 때문이니까.
-            # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-            
-            # val_rmse.append(rmse)
-            # val_mae.append(mae)
             
             pred.append(outputs)
             trg.append(batch['item_rating'])
@@ -375,9 +333,6 @@ def eval(model, ds_iter):
 
             epoch_iterator.set_description(
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
-
-        # total_rmse = sum(val_rmse) / len(val_rmse)
-        # total_mae = sum(val_mae) / len(val_mae)
         
         pred = torch.cat(pred)
         trg = torch.cat(trg)
