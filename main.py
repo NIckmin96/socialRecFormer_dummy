@@ -195,7 +195,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     criterion = nn.MSELoss()
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
-    start.record()
+    stream = torch.cuda.current_stream(device=device)
+    start.record(stream)
 
     # Training step
     for epoch in range(total_epochs):
@@ -275,14 +276,14 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
         # validation
-        end.record()
+        end.record(stream)
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
         # lr_scheduler.step() # cosineannealinglr
         model.train()
-        start.record()
+        start.record(stream)
 
         # Tensorboard recording
         # writer.add_scalar('Loss/Train', losses.avg, epoch)
@@ -316,7 +317,8 @@ def eval(model, ds_iter):
 
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
-    start.record()
+    stream = torch.cuda.current_stream(device=device)
+    start.record(stream)
     with torch.no_grad():
         epoch_iterator = tqdm(ds_iter['test'],
                         desc="Validating (X / X Steps) (loss=X.X)",
@@ -386,7 +388,7 @@ def eval(model, ds_iter):
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
 
-    end.record()
+    end.record(stream)
     torch.cuda.synchronize()
 
     print("\n [Evaluation Results]")
@@ -519,11 +521,11 @@ def main():
 
     if device=='cpu': 
         raise DeviceError
-    # # tmp
-    # elif torch.cuda.device_count()>1:
-    #     device = torch.device('cuda:2')
-    # else:
-    #     device = torch.device('cuda:0')
+    # tmp
+    elif torch.cuda.device_count()>1:
+        device = torch.device('cuda:2')
+    else:
+        device = torch.device('cuda:0')
     
     print(f"GPU index: {device.index}")
     print("\n")
