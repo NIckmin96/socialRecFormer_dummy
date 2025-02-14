@@ -259,7 +259,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
-        # lr_scheduler.step() # cosineannealinglr
+        # lr_scheduler.step() # else
         model.train()
         start.record(stream)
 
@@ -375,7 +375,7 @@ def get_args():
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
-    parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
+    parser.add_argument('--train_augs', type=int, default=1, help="how many times augment train data per anchor user")    
     parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
@@ -398,8 +398,11 @@ def main():
 
     training_config["learning_rate"] = args.lr
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    model_config["num_layers_enc"] = int(math.log(args.train_augs+1)*args.num_layers_enc)
-    model_config["num_layers_dec"] = int(math.log(args.train_augs+1)*args.num_layers_dec)
+    # model_config["num_layers_enc"] = int(math.log(args.train_augs+1,2)*args.num_layers_enc)
+    # model_config["num_layers_dec"] = int(math.log(args.train_augs+1,2)*args.num_layers_dec)
+    # [DEV]
+    model_config["num_layers_enc"] = args.num_layers_enc + int(math.log(args.train_augs,2))
+    model_config["num_layers_dec"] = args.num_layers_dec + int(math.log(args.train_augs,2))
     
     # model expansion (2) : MoE topk router
     model_config["n_experts"] = args.n_experts
@@ -482,18 +485,7 @@ def main():
     ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
         ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
 
-    '''
-    data_making_2.py에서는 한번에 train/valid/test를 만들고 있기 때문에, MyDataset 내에서 DatasetMaking 객체를 따로 불러오면 비효율적임
-    
-    1. 파일 있는지 확인(train/valid/test 전부)
-    2. 없으면 DatasetMaking 객체 생성
-    3. DatasetMaking 객체 내 train/valid/test -> dataset
 
-    regenerate 부분 추가하기
-    - regenerate==True시, 전체 데이터 처음부터 다시 생성하기
-
-    train data 생성시에, valid/test 데이터는 그대로 유지시키기
-    '''
     # regenerate 여부 확인
     if args.regenerate:
         print("Re-Creating Datatset...")
@@ -554,15 +546,16 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular', step_size_up=5, cycle_momentum=False, verbose=True)
-    
-    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7, verbose=True)
+    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular', step_size_up=5, cycle_momentum=False)
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7)
 
+    # [DEV] epinions
+    # lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch:0.95**epoch)
 
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.8,
+        factor = 0.9,
         patience = 5,
         threshold = 3e-2,
         min_lr = 1e-6,

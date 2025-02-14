@@ -54,8 +54,8 @@ epinions={
             "d_ffn": 256,            # FFN dim
             "num_heads": 2,
             "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
-            "num_layers_enc": 2,
-            "num_layers_dec": 2,
+            "num_layers_enc": 4,
+            "num_layers_dec": 4,
             "n_experts": 8,
             "topk": 1
          },
