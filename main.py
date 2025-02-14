@@ -398,8 +398,8 @@ def main():
 
     training_config["learning_rate"] = args.lr
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    # model_config["num_layers_enc"] = int(math.log(args.train_augs+1,2)*args.num_layers_enc)
-    # model_config["num_layers_dec"] = int(math.log(args.train_augs+1,2)*args.num_layers_dec)
+    # model_config["num_layers_enc"] = int(math.log(args.train_augs+1,3)*args.num_layers_enc)
+    # model_config["num_layers_dec"] = int(math.log(args.train_augs+1,3)*args.num_layers_dec)
     # [DEV]
     model_config["num_layers_enc"] = args.num_layers_enc + int(math.log(args.train_augs,2))
     model_config["num_layers_dec"] = args.num_layers_dec + int(math.log(args.train_augs,2))
