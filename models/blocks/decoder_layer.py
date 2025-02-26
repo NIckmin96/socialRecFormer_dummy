@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 from models.layers.multi_head_attention import MultiHeadAttention
-from models.layers.feed_forward_network import FeedForwardNetwork, SparseMoE
+from models.layers.feed_forward_network import FeedForwardNetwork
 
 class DecoderLayer(nn.Module):
     """
@@ -9,7 +9,7 @@ class DecoderLayer(nn.Module):
         fixed-length item sequences \n
         This items are interacted items of users in encoder's input random walk sequence.
     """
-    def __init__(self, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1, last_layer:bool=False, is_dec_layer:bool=True):
+    def __init__(self, d_model, d_ffn, num_heads, dropout=0.1, last_layer:bool=False, is_dec_layer:bool=True):
         super(DecoderLayer, self).__init__()
 
         self.last_layer_flag = last_layer
@@ -28,8 +28,7 @@ class DecoderLayer(nn.Module):
         if not self.last_layer_flag:
             # FFN
             self.norm3 = nn.LayerNorm(d_model)
-            self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
-            # self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
+            self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
             self.dropout3 = nn.Dropout(p=dropout)
         
         if self.last_layer_flag:
@@ -39,8 +38,11 @@ class DecoderLayer(nn.Module):
             # self.linear = nn.Linear(d_model, 1)
             self.last_attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, last_layer_flag=True, is_dec_layer=self.dec_layer)
 
-    def forward(self, x, rating_x, enc_output, trg_mask, src_mask, attn_bias):
-        # 1. Self-Attention
+    def forward(self, x, enc_output, trg_mask, src_mask, attn_bias):
+        # print("//////// In Decoder Layer ////////")
+        # 1. Perform self attention
+
+        # print('\n[[[[[[[[ Decoder Self Attention 시작 ]]]]]]]]')
         residual = x
         x = self.norm1(x)
         x, _ = self.attention(Q=x, K=x, V=x, mask=trg_mask, attn_bias=None)
@@ -50,12 +52,12 @@ class DecoderLayer(nn.Module):
         x = self.dropout1(x)
         x = x + residual
 
-        # 3. Encoder-Decoder Cross-Attention (bias here)
+        # 3. Perform Encoder-Decoder cross attention (bias here)
         if enc_output is not None:
+            # print('\n[[[[[[[[ Cross Attention 시작 ]]]]]]]]')
             residual = x
             
             enc_output = self.norm2(enc_output)
-            enc_output = enc_output + rating_x
             x = self.norm2(x)
 
             # print("     Start cross attention....")
@@ -71,8 +73,7 @@ class DecoderLayer(nn.Module):
             # 5. FFN
             residual = x
             x = self.norm3(x)
-            # x = self.ffn(x)
-            x = self.moe(x)
+            x = self.ffn(x)
 
             # 6. Add & Norm
             x = self.dropout3(x)
