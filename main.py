@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -81,7 +81,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             batch['item_rating'] = batch['item_rating'].to(device)
             batch['spd_matrix'] = batch['spd_matrix'].to(device)
 
-            outputs, enc_loss, dec_loss = model(batch)
+            outputs, enc_loss, dec_loss = model(batch, is_train=False)
 
             # loss = criterion(outputs.float(), batch['item_rating'].float())
             # FIXME:
@@ -101,6 +101,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             loss = torch.sum(squared_diff) / torch.sum(mask)
+            loss = torch.sqrt(loss) # dev
             #loss = criterion(outputs[mask].float(),batch['item_rating'][mask].float()).cuda()
 
             loss += enc_loss
@@ -112,9 +113,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
                 # -> 현재 목표는 rating regression이기 때문이니까.
             # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
             # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
-            eval_losses.update(loss)
+            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean'
 
             # val_rmse.append(rmse)
             # val_mae.append(mae)
@@ -174,16 +173,14 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             update_cnt += 1
 
     return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
+    # return eval_losses.val, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
-# def train(model, optimizer, ds_iter, training_config, criterion):
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
     logger.info("***** Running training *****")
     logger.info("  Total steps = %d", training_config["num_train_steps"])
-    
-    #losses = []
 
     checkpoint_path = training_config['checkpoint_path']
     best_dev_rmse = 9999.0
@@ -200,7 +197,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     criterion = nn.MSELoss()
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
-    start.record()
+    stream = torch.cuda.current_stream(device=device)
+    start.record(stream)
 
     # Training step
     for epoch in range(total_epochs):
@@ -225,85 +223,57 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             outputs, enc_loss, dec_loss = model(batch)
 
             # compute loss
-            # FIXME: 
-                # 현재 target(batch['item_rating'])은 0이 많이 포함되어 있는 sparse한 rating matrix로, shape가 [seq_len_user, seq_len_item] (batch dim 제외)
-                # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
-                # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
-                # 따라서 Masked MSELoss를 사용
-                
-            # loss = criterion(outputs.float(), batch['item_rating'].float())
-
-
-            
+                        
             ####### dec_loss
             mask = (batch['item_rating'] != 0)
-            # abs_diff = torch.abs(outputs - batch['item_rating'])*mask
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             org_loss = torch.sum(squared_diff) / torch.sum(mask)
             org_loss = torch.sqrt(org_loss) # RMSE
 
-            ########## new_loss ?
-            
-            #mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            #rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
-            #loss = criterion(outputs[mask].float(),batch['item_rating'][mask].float()).cuda()
-            #print(outputs.shape)
             batch['item_rating'] = batch['item_rating'][:,0] 
             outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            #print(outputs.shape)
             
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             new_loss = torch.sum(squared_diff) / torch.sum(mask)
 
             # loss =  org_loss + new_loss * training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"] 
+            
+            # [ORG]
             loss = org_loss*training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"]
-
-            #loss = loss + spd_loss + new_loss
             
+            # [DEV]
+            # loss = org_loss*training_config["alpha"] + enc_loss * training_config["beta"] 
             loss.backward()
-            
-            # print(loss)
-            # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
             optimizer.step()
-            lr_scheduler.step()
-            lr_lst.append(lr_scheduler.get_last_lr())
-            #optimizer.zero_grad()
+            optimizer.zero_grad()
 
             losses.update(loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
-        print(np.max(np.array(lr_lst)), np.min(np.array(lr_lst)), np.mean(np.array(lr_lst)))
         # validation
-        end.record()
+        end.record(stream)
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
+        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
+        # lr_scheduler.step() # else
         model.train()
-        start.record()
+        start.record(stream)
 
         # Tensorboard recording
-        # writer.add_scalar('Loss/Train', losses.avg, epoch)
-        # writer.add_scalar('Loss/Valid', valid_loss, epoch)
-        #writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss, 'Org':org_losses.avg, 'SPD':spd_losses.avg, 'new':new_losses.avg}, epoch)
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
-        # if best_dev_mae < 0.81:
-        #     break
         if epoch > 100:
             break
-        if update_cnt > 10:
+        # if update_cnt > 10:
+        if update_cnt > 100: # dev
             break
     writer.close()
 
@@ -322,7 +292,8 @@ def eval(model, ds_iter):
 
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
-    start.record()
+    stream = torch.cuda.current_stream(device=device)
+    start.record(stream)
     with torch.no_grad():
         epoch_iterator = tqdm(ds_iter['test'],
                         desc="Validating (X / X Steps) (loss=X.X)",
@@ -340,37 +311,22 @@ def eval(model, ds_iter):
             batch['item_degree'] = batch['item_degree'].to(device)
             batch['item_rating'] = batch['item_rating'].to(device)
             batch['spd_matrix'] = batch['spd_matrix'].to(device)
-            outputs, enc_loss, dec_loss = model(batch)
+            outputs, enc_loss, dec_loss = model(batch, is_train=False)
 
-            # loss = criterion(outputs.float(), batch['item_rating'].float())
             # FIXME: 
                 # 현재 target(batch['item_rating'])은 0이 많이 포함되어 있는 sparse한 rating matrix로, shape가 [seq_len_user, seq_len_item] (batch dim 제외)
                 # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
                 # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
                 # 따라서 Masked MSELoss를 사용
                 # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산하게 된다.
-            #print(batch['item_rating'].shape)
             batch['item_rating'] = batch['item_rating'][:,0] 
-            outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            
+            outputs = outputs[:,0]            
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             loss = torch.sum(squared_diff) / torch.sum(mask)
             loss += enc_loss
-            loss += dec_loss
-            
-            # eval_losses.update(loss.mean())
+            # loss += dec_loss
             eval_losses.update(loss)
-            
-            # 실제 rating matrix에서 0이 아닌 부분(실제 매긴 rating)과만 loss를 계산
-                # -> 현재 목표는 rating regression이기 때문이니까.
-            # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-            
-            # val_rmse.append(rmse)
-            # val_mae.append(mae)
             
             pred.append(outputs)
             trg.append(batch['item_rating'])
@@ -378,9 +334,6 @@ def eval(model, ds_iter):
 
             epoch_iterator.set_description(
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
-
-        # total_rmse = sum(val_rmse) / len(val_rmse)
-        # total_mae = sum(val_mae) / len(val_mae)
         
         pred = torch.cat(pred)
         trg = torch.cat(trg)
@@ -390,8 +343,9 @@ def eval(model, ds_iter):
         mse = F.mse_loss(pred[msk].float(), trg[msk].float(), reduction='none')
         total_rmse = torch.sqrt(mse.mean())
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
+    parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
 
-    end.record()
+    end.record(stream)
     torch.cuda.synchronize()
 
     print("\n [Evaluation Results]")
@@ -413,17 +367,19 @@ def get_args():
     parser.add_argument('--name', type=str, help="checkpoint model name")
     parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
     parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
+    parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
+    parser.add_argument('--topk', type=int, default=1, help="MoE number of routers")
     parser.add_argument('--lr', type=float, default=1e-4)
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
-    parser.add_argument('--data_seed', type=int, default=42)
-    parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
+    parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
-    parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
+    parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
-    parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
+    parser.add_argument('--train_augs', type=int, default=1, help="how many times augment train data per anchor user")    
     parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
+    parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
     args = parser.parse_args()
     return args
@@ -443,8 +399,15 @@ def main():
 
     training_config["learning_rate"] = args.lr
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    model_config["num_layers_enc"] = int(math.log(args.train_augs+1)*args.num_layers_enc)
-    model_config["num_layers_dec"] = int(math.log(args.train_augs+1)*args.num_layers_dec)
+    # model_config["num_layers_enc"] = int(math.log(args.train_augs+1,3)*args.num_layers_enc)
+    # model_config["num_layers_dec"] = int(math.log(args.train_augs+1,3)*args.num_layers_dec)
+    # [DEV]
+    model_config["num_layers_enc"] = args.num_layers_enc + int(math.log(args.train_augs,2))
+    model_config["num_layers_dec"] = args.num_layers_dec + int(math.log(args.train_augs,2))
+    
+    # model expansion (2) : MoE topk router
+    model_config["n_experts"] = args.n_experts
+    model_config["topk"] = args.topk
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -456,7 +419,6 @@ def main():
 
     ###  set the random seeds for deterministic results. ####
     SEED = args.seed
-    #SEED = 42
     random.seed(SEED)
     torch.manual_seed(SEED)
     torch.backends.cudnn.deterministic = True
@@ -479,9 +441,9 @@ def main():
         os.makedirs(checkpoint_dir)
     
     name_dataset = str(args.dataset)
-    name_seed = str(args.data_seed)
+    name_seed = str(args.seed)
     name_u_len = str(args.user_seq_len)
-    name_i_len = str(args.item_seq_len)
+    name_i_len = str(args.user_seq_len*args.item_per_user)
     name_n_enc = str(model_config['num_layers_enc'])
     name_n_dec = str(model_config['num_layers_dec'])
     name_train_augs = str(args.train_augs)
@@ -490,24 +452,15 @@ def main():
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
-    """if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print("model loaded from: " + checkpoint_path)"""
+    # print(model)
 
-
-    #model = model.cuda()
-    print(model)
-    # print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
-    # print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
-
-    device_ids = list(range(torch.cuda.device_count()))
     # gpu device선택
+    device_ids = list(range(torch.cuda.device_count()))
     pynvml.nvmlInit()
     for i in device_ids:
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
         util_info = pynvml.nvmlDeviceGetUtilizationRates(handle)
-        if not util_info.gpu:
+        if util_info.gpu < 10:
             device = torch.device(f'cuda:{i}')
             break
         else:
@@ -517,73 +470,59 @@ def main():
 
     if device=='cpu': 
         raise DeviceError
+    # tmp
+    elif torch.cuda.device_count()>1:
+        device = torch.device('cuda:2')
+    else:
+        device = torch.device('cuda:0')
     
     print(f"GPU index: {device.index}")
     print("\n")
     
     model = model.to(device)
-    # model = model.cuda()
 
     ######################################################### data preparation #########################################################
 
     ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
         ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
 
-    '''
-    data_making_2.py에서는 한번에 train/valid/test를 만들고 있기 때문에, MyDataset 내에서 DatasetMaking 객체를 따로 불러오면 비효율적임
-    
-    1. 파일 있는지 확인(train/valid/test 전부)
-    2. 없으면 DatasetMaking 객체 생성
-    3. DatasetMaking 객체 내 train/valid/test -> dataset
 
-    regenerate 부분 추가하기
-    - regenerate==True시, 전체 데이터 처음부터 다시 생성하기
-
-    train data 생성시에, valid/test 데이터는 그대로 유지시키기
-    '''
     # regenerate 여부 확인
     if args.regenerate:
         print("Re-Creating Datatset...")
-        if args.test_augs:
-            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
-        else:
-            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
-        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
+    else:
+        print("Loading Datatset...")
+    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_per_user, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
 
     # 1. file path check(train_augs & test_augs)
     train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
-    valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
+    # valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+    #                           f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
     if args.test_augs:
+        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}\n \
+            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
     else:
+        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n \
+            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
         test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test.pkl')
     
-    print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+    # print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
     print("\n")
-    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
+    # data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
     total_train = data_making.total_train
-    total_valid = data_making.total_valid
-    total_test = data_making.total_test
-        
-    # print(total_train.shape)
-    # print(total_test.shape)
-    # print(total_valid.shape)
-
-        # del data_making # for memory capacity
-        
+    # total_valid = data_making.total_valid
+    total_test = data_making.total_test        
 
     train_ds = MyDataset(total_train)
-    valid_ds = MyDataset(total_valid)
+    # valid_ds = MyDataset(total_valid)
     test_ds = MyDataset(total_test)
-    
 
-    # train_ds = MyDataset(dataset=args.dataset, split='train', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params, train_augs=args.train_augs)
-    # test_ds = MyDataset(dataset=args.dataset, split='test', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params)
-
+    # batch size update
+    training_config["batch_size"] = args.bs
     ds_iter = {
             # "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=8),
             "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
@@ -608,29 +547,40 @@ def main():
     training_config["num_train_steps"] = len(ds_iter['train'])
     
 
-    
-    # lr_scheduler = WarmupCosineSchedule(optimizer, warmup_steps=training_config["warmup"], t_total=total_train_samples*total_epochs)
-    
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
-        optimizer = optimizer,
-        max_lr = training_config["learning_rate"],
-        # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
-        pct_start = 0.15,
-        # anneal_strategy = training_config["lr_decay"],
-        anneal_strategy = 'cos',
-        epochs = training_config["num_epochs"],
-        # steps_per_epoch = 2 * len(ds_iter['train'])
-        steps_per_epoch = len(ds_iter['train'])
-    )
+    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular', step_size_up=5, cycle_momentum=False)
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7)
 
-    # criterion = nn.MSELoss()
+    # [DEV] epinions
+    # lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch:0.95**epoch)
+
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer = optimizer,
+        mode = 'min',
+        factor = 0.85,
+        patience = 3,
+        threshold = 1e-2,
+        min_lr = 1e-6,
+        verbose = True
+    )
+    
+    # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
+    #     optimizer = optimizer,
+    #     max_lr = training_config["learning_rate"],
+    #     # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
+    #     pct_start = 0.15,
+    #     # anneal_strategy = training_config["lr_decay"],
+    #     anneal_strategy = 'cos',
+    #     epochs = training_config["num_epochs"],
+    #     # steps_per_epoch = 2 * len(ds_iter['train'])
+    #     steps_per_epoch = len(ds_iter['train'])
+    # )
+
 
     ### TensorBoard writer preparation ###
     writer = SummaryWriter(os.path.join(log_dir,f"{args.name}.tensorboard"))
     ### train ###
     if args.mode == 'train':
         train(model, optimizer, lr_scheduler, ds_iter, training_config, writer)
-        # train(model, optimizer, ds_iter, training_config, criterion)
 
     # Since train logging is done by TensorBoard, log only test result.
     log_path = os.path.join(log_dir,'{}.{}.log'.format(args.mode, args.name))
@@ -640,9 +590,7 @@ def main():
 
     print(json.dumps([model_config, training_config], indent = 4))
 
-    print(model)
-    #print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
-    #print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
+    # print(model)
 
     ### eval ###
     print(checkpoint_path)
