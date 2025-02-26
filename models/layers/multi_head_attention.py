@@ -43,12 +43,14 @@ class ScaledDotProductAttention(nn.Module):
                 # loss = torch.mean(torch.abs((score.float() - attn_bias.float()))) / (batch_size*head*len_a*len_b)
                 
                 # [DEV] : ranking task를 위한 new decoder loss
-                loss = F.binary_cross_entropy_with_logits(score.float(), attn_bias.float()) / (batch_size*head*len_a*len_b)
+                # loss = F.binary_cross_entropy_with_logits(score.float(), attn_bias.float()) / (batch_size*head*len_a*len_b)
+                loss = F.binary_cross_entropy_with_logits(torch.mean(score.float(), dim=1), torch.mean(attn_bias.float(), dim=1)) / (batch_size*len_a*len_b) # dev
     
             else:
                 # encoder loss(attn_bias : user간의 distance / encoder attention score vs attn_bias)
                 attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double()) # attn_bias = spd(user distance)
-                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
+                # loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
+                loss = torch.sqrt(F.mse_loss(torch.mean(score.float(), dim=1), torch.mean(attn_bias.float(), dim=1))) / (batch_size*length*length)
                 
 
         ### Decoder 마지막 layer에서 Q * K.T(score)의 Head를 기준으로한 mean값을 Return

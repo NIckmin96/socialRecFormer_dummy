@@ -101,6 +101,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             loss = torch.sum(squared_diff) / torch.sum(mask)
+            loss = torch.sqrt(loss) # dev
             #loss = criterion(outputs[mask].float(),batch['item_rating'][mask].float()).cuda()
 
             loss += enc_loss
@@ -171,8 +172,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
         else:
             update_cnt += 1
 
-    # return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
-    return eval_losses.val, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
+    return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
+    # return eval_losses.val, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
@@ -272,7 +273,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         if epoch > 100:
             break
         # if update_cnt > 10:
-        if update_cnt > 20: # dev
+        if update_cnt > 100: # dev
             break
     writer.close()
 
@@ -451,7 +452,7 @@ def main():
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
-    print(model)
+    # print(model)
 
     # gpu device선택
     device_ids = list(range(torch.cuda.device_count()))
@@ -555,9 +556,9 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.9,
-        patience = 5,
-        threshold = 3e-2,
+        factor = 0.85,
+        patience = 3,
+        threshold = 1e-2,
         min_lr = 1e-6,
         verbose = True
     )

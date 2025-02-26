@@ -27,12 +27,12 @@ ciao={
             "learning_rate":0.0001,
             "warmup":40, 
             "lr_decay":"linear",
-            "weight_decay":0,
+            "weight_decay":1e-2,
             "num_epochs":100,
             "patience":10, 
             "alpha":1,
-            "beta":3,
-            "gamma":3,
+            "beta":1, # enc loss
+            "gamma":1, # dec loss
             "baseline_rmse":0.974,
             "baseline_mae":0.7323
          },
@@ -52,8 +52,8 @@ epinions={
             "max_spd_value": 15,
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
-            "num_heads": 2,
-            "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "num_heads": 4,
+            "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
             "num_layers_enc": 4,
             "num_layers_dec": 4,
             "n_experts": 8,
@@ -65,14 +65,14 @@ epinions={
             "learning_rate":0.0001,
             "warmup":80, 
             "lr_decay":"linear",
-            "weight_decay":0,
+            "weight_decay":1e-2,
             "eval_frequency":400, 
             "num_epochs":100,
             "num_eval_steps":849,   # total_valid_sample / total_epoch
             "patience":10, 
             "alpha":1,
-            "beta":3,
-            "gamma":3,
+            "beta":1, # enc loss
+            "gamma":1, # dec loss
             "baseline_rmse":0.8383,
             "baseline_mae":1.0972
          },
