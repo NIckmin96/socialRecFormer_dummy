@@ -10,7 +10,7 @@ class Encoder(nn.Module):
     Encoder for modeling user representation (in social graph)
     """
     # def __init__(self, max_degree, num_user, d_model, d_ffn, num_heads, dropout, num_layers):
-    def __init__(self, max_degree, num_user, max_spd_value, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, max_degree, num_user, max_spd_value, d_model, d_ffn, num_heads, dropout, num_layers):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -40,8 +40,6 @@ class Encoder(nn.Module):
                 d_model = d_model,
                 d_ffn = d_ffn,
                 num_heads = num_heads,
-                n_experts = n_experts,
-                topk = topk,
                 dropout = dropout
             ) for _ in range(num_layers)]
         )
@@ -62,8 +60,7 @@ class Encoder(nn.Module):
 
         # Spatial Encoding [TODO] attn_bias 만드는 과정에서 불필요한 permutation 제거
             # [batch_size, seq_length, seq_length, num_heads] ==> [batch_size, num_heads, seq_length, seq_length]
-        # attn_bias = self.spatial_pos_bias(batched_data).permute(0, 3, 2, 1)
-        attn_bias = self.spatial_pos_bias(batched_data)
+        attn_bias = self.spatial_pos_bias(batched_data).permute(0, 3, 2, 1)
 
         ### Ablation study: No attn_bias
         #attn_bias = None

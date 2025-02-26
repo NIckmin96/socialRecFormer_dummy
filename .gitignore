@@ -2,8 +2,6 @@ __pycache__/
 logs/
 checkpoints/
 dataset/
-!dataset/*.npy
-!dataset/*.mat
 *.pkl
 *.npy
 runs/
