@@ -13,6 +13,8 @@ import os
 import time
 import pickle
 import random
+import warnings
+warnings.filterwarnings('ignore')
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -142,6 +144,7 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False
     else:
         print("Creating Rating split sets...")
         rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
+        rating_df = rating_df.drop_duplicates(subset=['user_id','product_id'],keep='first')
         ### train test split TODO: Change equation for split later on    
         split_rating_df = shuffle(rating_df, random_state=seed)
         num_test = int(len(split_rating_df)*test)
@@ -165,16 +168,23 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
     Generate social graph from train/test/validation dataset
     """
     split_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
-    if not os.path.isfile(split_file) or regenerate:
+    rating_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
+    if (not os.path.isfile(split_file)) or regenerate:
+        print(f"Creating Social {split} split sets...")
         trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
         social_split = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
+        # social 기준으로 rating split file re-filtering
+        unique_users = list(set(social_split['user_id_1'].unique()).union(set(social_split['user_id_2'].unique())))
+        rating_split = rating_split[rating_split.user_id.isin(unique_users)]
         # save
         social_split.to_csv(split_file)
+        rating_split.to_csv(rating_file, index=False)
     else:
         social_split = pd.read_csv(split_file)
+        rating_split = pd.read_csv(rating_file)
     
-    return social_split
+    return social_split, rating_split
 
 def generate_user_degree_table(data_path:str, trust_split, split:str='train', seed:int=42, regenerate=False) -> pd.DataFrame:
     """
@@ -230,6 +240,7 @@ def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, de
     if os.path.isfile(user_item_dir) and (not regenerate):
         user_item_dataframe = pd.read_csv(user_item_dir)
     else:
+        print(f"Creating {split} user-item table...")
         degree_table = dict(zip(degree_table['product_id'], degree_table['degree']))    # for id mapping.
 
         user_item_dataframe = rating_split.groupby('user_id').agg({'product_id': list, 'rating': list}).reset_index()
@@ -412,7 +423,7 @@ def str_to_list(x):
     else:
         return x 
     
-def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, split:str, random_walk_len:int=30, item_per_user:int=5, return_params:int=1, train_augs:int=10, test_augs:bool=False, regenerate:bool=False, test_user_item:dict={}):
+def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int, split:str, random_walk_len:int=30, item_per_user:int=5, return_params:int=1, train_augs:int=10, test_augs:bool=False, rating_thres:int=3, regenerate:bool=False, test_user_item:dict={}):
 
     # if os.path.isfie(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"):
     #     print(data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"+" file exists")
@@ -445,11 +456,8 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
     elif split=='valid':
         total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
     else:
-        if test_augs:
-            test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
-            total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
-        else:
-            total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test.pkl"
+        test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
+        total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(not regenerate):
@@ -457,6 +465,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         print(total_path)
         print(f"Loading {split} total df(input_sequence_data)...")
         total_df = pd.read_pickle(total_path)
+        print(f"total df dir : {total_path}")
         if split=='test':
             return total_df, {}
         else:
@@ -481,6 +490,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         
         # user_id : product_id(list)
         user_product_dic = dict(zip(item_df['user_id'], item_df['product_id']))
+        user_rating_dic = dict(zip(item_df['user_id'], item_df['rating']))
         
         # product_id(list) : product_degree(list)
         all_item, all_degree = [],[]
@@ -512,16 +522,25 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         # new total df creation method(based on map function)
         tqdm.pandas()
 
-        total_df = pd.DataFrame(columns=['user_id', 'user_sequences', 'user_degree', 'item_sequences', 'item_degree', 'item_rating', 'spd_matrix'])
+        total_df = pd.DataFrame()
         # user
         total_df['user_id'] = user_df['user_id']
         total_df['user_sequences'] = user_df['random_walk_seq']
         total_df['user_degree'] = user_df['degree']
-        # item
+        # item(anchor user에 해당)
         print("Processing Item sequences / Degrees ...")
+        total_df['anchor_degree'] = total_df['user_degree'].map(lambda x:x[0])
+        total_df['anchor_items'] = total_df['user_id'].map(user_product_dic)
+        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        total_df['anchor_ratings'] = total_df['user_id'].map(user_rating_dic)
+        total_df['anchor_ratings'] = total_df['anchor_ratings'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        total_df = total_df.explode(['anchor_items','anchor_ratings'])
+        total_df = total_df.drop_duplicates(subset='user_id',keep='first')
+        total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
+        total_df['imp_fdback'] = total_df['anchor_ratings'].map(lambda seq:list(map(lambda x:1 if x>=rating_thres else 0,seq)))
+        # item(user sequence에 해당)
         # total_df['item_sequences'] = total_df['user_sequences'].progress_map(lambda seq:list(map(lambda x:user_product_dic[x], seq)))
         total_df['item_sequences'] = total_df['user_sequences'].progress_map(lambda seq:list(map(map_user_item, seq)))
-        # print(total_df['item_sequences'][0])
         total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:sum(x,start=[])).map(lambda x:list(set(x)-set([0])))
         total_df['item_degree'] = total_df['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
         # slice item & degree
@@ -529,23 +548,87 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df = total_df.explode(['item_sequences','item_degree']).reset_index(drop=True)
-        # print(total_df.shape)
         # spd matrix
         print("Processing Spd Matrix ...")
         total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
         # rating matrix(user-item)
         print("Processing Rating Matrix ...")
         total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
+        total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback',
+                             'item_sequences','item_degree','spd_matrix','item_rating']]
 
         with open(total_path, "wb") as file:
             pickle.dump(total_df, file)
 
+    print(f"total df dir : {total_path}")
     print(f"# of total {split} : {len(total_df)}")    
     
     if split=='test':
         return total_df, test_user_product_dict
     else:
         return total_df
+    
+def generate_ranking_test_data(data_path, rating_test, item_degree_test, user_item_train, user_item_test, user_degree_df, seed, user_seq_len, item_per_user, rating_thres, regenerate):
+    file_path = os.path.join(data_path, f'ranking_test_data_seed_{seed}.csv')
+    
+    if os.path.isfile(file_path) and (not regenerate):
+        ranking_test_df = pd.read_pickle(file_path)
+    else:
+        print("Creating Ranking test dataset...")
+        spd_table = torch.from_numpy(np.load(data_path + '/' + 'shortest_path_result.npy')).long()
+        item_seq_len = user_seq_len*item_per_user
+        # 1. test - train
+        ranking_data = pd.DataFrame()
+        ranking_data['user_id'] = user_item_test['user_id'].copy()
+        ranking_data = ranking_data.iloc[1:,].reset_index(drop=True)
+        ranking_data['product_id'] = ranking_data['user_id'].map(lambda x:list(set(*user_item_test[user_item_test['user_id']==x]['product_id'])-set(*user_item_train[user_item_train['user_id']==x]['product_id'])))
+        ranking_data['product_id'] = ranking_data['product_id'].map(str_to_list)
+        # 2. rating 정보 붙이기
+        user_item_rating = rating_test.groupby('user_id').agg({'product_id':list, 'rating':list})
+        user_item_rating['dic'] = user_item_rating.apply(lambda x:dict(zip(x['product_id'],x['rating'])), axis=1)
+        user_item_rating_dic = dict(zip(user_item_rating.index, user_item_rating['dic']))
+        ranking_data['rating'] = ranking_data.apply(lambda x:list(map(lambda y:user_item_rating_dic[x['user_id']][y], x['product_id'])), axis=1)
+        ranking_data['rating'] = ranking_data['rating'].map(str_to_list)
+        # 3. product degree 정보
+        item_degree_dic = dict(zip(item_degree_test['product_id'], item_degree_test['degree']))
+        ranking_data['product_degree'] = ranking_data['product_id'].map(lambda seq:list(map(lambda x:item_degree_dic[x], seq)))
+        ranking_data['product_degree'] = ranking_data['product_degree'].map(str_to_list)
+        # 4. user 정보 붙이기
+        user_degree_dict = dict(zip(user_degree_df['user_id'], user_degree_df['degree']))
+        ranking_test_df = ranking_data[['user_id','product_id','product_degree','rating']]
+        ranking_test_df['user_sequences'] = ranking_test_df['user_id'].progress_map(lambda x:[x]*user_seq_len)
+        ranking_test_df['user_sequences'] = ranking_test_df['user_sequences'].map(str_to_list)
+        ranking_test_df['user_degree'] = ranking_test_df['user_id'].progress_map(lambda x:[user_degree_dict[x]]*user_seq_len)
+        ranking_test_df['user_degree'] = ranking_test_df['user_degree'].map(str_to_list)
+        # 5. explicit rating to implicit rating
+        ranking_test_df['imp_fdback'] = ranking_test_df['rating'].progress_map(lambda seq:list(map(lambda x:1 if x>=rating_thres else 0, seq)))
+        # 6. user distance
+        ranking_test_df['spd_matrix'] = ranking_test_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
+        # 7. columns 순서 재배치 & rename
+        ranking_test_df = ranking_test_df.loc[:,['user_id','user_sequences','user_degree','product_id','product_degree','imp_fdback','rating','spd_matrix']]
+        ranking_test_df.rename(columns={'product_id':'item_sequences',
+                                        'product_degree':'item_degree',
+                                        'rating':'item_rating'},
+                               inplace=True)
+        # padding & slicing
+        ranking_test_df['item_sequences'] = ranking_test_df['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        ranking_test_df['item_degree'] = ranking_test_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        ranking_test_df['imp_fdback'] = ranking_test_df['imp_fdback'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        ranking_test_df['item_rating'] = ranking_test_df['item_rating'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        # explode item sequence
+        ranking_test_df = ranking_test_df.explode(['item_sequences','item_degree','imp_fdback','item_rating'])
+        # keep sequences by 'item_seq_len' and drop leftovers
+        ranking_test_df = ranking_test_df.drop_duplicates(subset='user_id',keep='first')
+        # drop na(test-train 하면서 결측치가 있는 부분 생길 수 있음)
+        ranking_test_df = ranking_test_df.dropna(axis=0, how='any')
+        # sort by 'user_id'
+        ranking_test_df = ranking_test_df.sort_values(by='user_id')
+        ranking_test_df = ranking_test_df.reset_index(drop=True)
+        # save
+        with open(file_path, "wb") as file:
+            pickle.dump(ranking_test_df, file)
+        
+    return ranking_test_df    
 
 def pad_list(input_list:list, slice_length:int):
         """

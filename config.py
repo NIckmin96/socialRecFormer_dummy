@@ -8,9 +8,9 @@ ciao={
          },
          "model":{
             "num_user": 7317,
-            "max_degree_user": 804,
+            "max_user_degree": 804,
             "num_item": 105114,
-            "max_degree_item": 915,
+            "max_item_degree": 915,
             "max_spd_value": 15,
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
             "d_ffn": 256,            # FFN dim
@@ -46,14 +46,14 @@ epinions={
          },
          "model":{
             "num_user": 18098,
-            "max_degree_user": 2026,
+            "max_user_degree": 2026,
             "num_item": 261679,
-            "max_degree_item": 1440,
+            "max_item_degree": 1440,
             "max_spd_value": 15,
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
-            "num_heads": 2,
-            "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "num_heads": 4,
+            "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
             "num_layers_enc": 4,
             "num_layers_dec": 4,
             "n_experts": 8,
