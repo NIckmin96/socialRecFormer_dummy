@@ -444,18 +444,7 @@ def main():
     ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
         ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
 
-    '''
-    data_making_2.py에서는 한번에 train/valid/test를 만들고 있기 때문에, MyDataset 내에서 DatasetMaking 객체를 따로 불러오면 비효율적임
-    
-    1. 파일 있는지 확인(train/valid/test 전부)
-    2. 없으면 DatasetMaking 객체 생성
-    3. DatasetMaking 객체 내 train/valid/test -> dataset
 
-    regenerate 부분 추가하기
-    - regenerate==True시, 전체 데이터 처음부터 다시 생성하기
-
-    train data 생성시에, valid/test 데이터는 그대로 유지시키기
-    '''
     # regenerate 여부 확인
     if args.regenerate:
         print("Re-Creating Datatset...")
