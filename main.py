@@ -84,8 +84,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             
             org_loss = RMSE(outputs, batch['item_rating'], mask)
 
-            # loss = org_loss + dec_bce
-            loss = org_loss
+            loss = org_loss + dec_bce
+            # loss = org_loss
             
             eval_losses.update(loss)
             org_losses.update(org_loss)
@@ -194,8 +194,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             org_loss = RMSE(outputs, batch['item_rating'], mask)
             
             # loss = org_loss + enc_loss + dec_bce + dec_rmse
-            # loss = org_loss + dec_bce
-            loss = org_loss
+            loss = org_loss + dec_bce
+            # loss = org_loss
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -278,12 +278,12 @@ def eval(model, ds_iter):
             outputs, enc_loss, dec_bce, dec_rmse = model(batch, is_train=False)
             mask = (batch['item_rating'] != 0)
             
-            # loss = RMSE(outputs, batch['item_rating'], mask)
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            loss = torch.sum(squared_diff) / torch.sum(mask)
-            loss = torch.sqrt(loss) # dev
+            loss = RMSE(outputs, batch['item_rating'], mask)
+            # squared_diff = (outputs - batch['item_rating'])**2 * mask
+            # loss = torch.sum(squared_diff) / torch.sum(mask)
+            # loss = torch.sqrt(loss) # dev
 
-            loss += enc_loss
+            # loss += enc_loss
             loss += dec_bce
             eval_losses.update(loss)
             
@@ -323,10 +323,10 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
+    parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
+    parser.add_argument('--num_layers_dec', type=int, default=6, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
-    parser.add_argument('--topk', type=int, default=1, help="MoE number of routers")
+    parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
     parser.add_argument('--rating_thres', type=int, default=3, help="explicit rating threshold for creating implicit feedback")
     parser.add_argument('--lr', type=float, default=1e-4)
     # dataset args
@@ -363,7 +363,8 @@ def main():
     
     # model expansion (2) : MoE topk router
     model_config["n_experts"] = args.n_experts
-    model_config["topk"] = args.topk
+    # model expansion (2)-2 : MoE topk # of experts
+    model_config["topk"] = args.topk + int(math.log(args.train_augs,2))
     
     # model expansion (3) : rating threshold for ranking task
     model_config["rating_thres"] = args.rating_thres
@@ -385,7 +386,7 @@ def main():
 
     ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
     print(model_config)
-    model = Transformer(**model_config)
+    model = Transformer(**model_config, args=args)
 
     # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
@@ -508,17 +509,29 @@ def main():
     total_train_samples = len(train_ds)
     training_config["num_train_steps"] = len(ds_iter['train'])
 
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    # lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer = optimizer,
+    #     mode = 'min',
+    #     factor = 0.85,
+    #     patience = 3,
+    #     threshold = 1e-2,
+    #     min_lr = 1e-6,
+    #     verbose = True
+    # )
+
+    # [DEV]
+
+    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
         optimizer = optimizer,
-        mode = 'min',
-        factor = 0.9,
-        patience = 5,
-        threshold = 1e-2,
-        min_lr = 1e-6,
-        verbose = True
+        max_lr = training_config["learning_rate"],
+        epochs=training_config["num_epochs"],
+        steps_per_epoch=training_config["num_train_steps"],
+        pct_start = 0.3,
+        anneal_strategy = training_config["lr_decay"],
+        div_factor = 100,
+        final_div_factor = 100
     )
     
-    # # [DEV]
     # lr_scheduler = CosineAnnealingWarmUpRestarts(optimizer=optimizer,
     #                                              T_0=10,
     #                                              T_mult=1,

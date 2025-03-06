@@ -14,6 +14,7 @@ class ScaledDotProductAttention(nn.Module):
             self.spd_param = nn.Parameter(torch.randn((30, 30), dtype=torch.float, requires_grad=True))
     
     def forward(self, Q, K, V, mask=None, attn_bias=None, last_layer_flag=False, is_dec_layer=False, is_rating=True):
+        rating_pred = None
         # Input is 4-d tensor
         batch_size, head, length, d_tensor = K.size()
 
@@ -47,8 +48,7 @@ class ScaledDotProductAttention(nn.Module):
                 
         ### Decoder 마지막 layer에서 Q * K.T(score)의 Head를 기준으로한 mean값을 Return
         if last_layer_flag:
-            score = torch.mean(score, dim=1)
-            return score, loss
+            rating_pred = torch.mean(score, dim=1)
 
         # 3. Pass score to softmax for making [0, 1] range.
         score = torch.softmax(score, dim=-1)
@@ -56,7 +56,7 @@ class ScaledDotProductAttention(nn.Module):
         # 4. Dot product with V
         V = torch.matmul(score, V)
         
-        return V, loss
+        return V, loss, rating_pred
 
 class MultiHeadAttention(nn.Module):
     """
@@ -89,21 +89,17 @@ class MultiHeadAttention(nn.Module):
         # Apply mask for multi-head attention
         if mask is not None:
             mask = mask.unsqueeze(1).repeat(1, self.num_heads, 1, 1)
-
-        if not self.last_layer_flag:
-            # 3. Perform scaled-dot product attention
-            out, loss = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer, self.is_rating)
             
-        # last layer : Decoder의 마지막 layer (cross-attn)는 rating prediction을 수행
-        else: 
-            out, loss = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer, self.is_rating)
-            return out, loss
+        out, loss, rating_pred = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer, self.is_rating)
         
         # 4. Concat and pass to linear layer
         out = self.concat(out)
         out = self.W_concat(out)
 
-        return out, loss
+        if self.last_layer_flag:
+            return out, loss, rating_pred
+        else:
+            return out, loss
     
     def split(self, tensor):
         """

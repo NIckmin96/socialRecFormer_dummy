@@ -8,7 +8,7 @@ from utils import he_init
 
 class Transformer(nn.Module):
     # def __init__(self, num_user, max_degree_user, num_item, max_degree_item, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec):
-    def __init__(self, num_user, max_user_degree, max_spd_value, num_item, max_item_degree, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec, n_experts, topk, rating_thres):
+    def __init__(self, num_user, max_user_degree, max_spd_value, num_item, max_item_degree, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec, n_experts, topk, rating_thres, args):
         super(Transformer, self).__init__()
 
         self.encoder = Encoder(
@@ -36,7 +36,8 @@ class Transformer(nn.Module):
             num_layers=num_layers_dec,
             n_experts=n_experts,
             topk=topk,
-            rating_thres=rating_thres
+            rating_thres=rating_thres,
+            args=args
         )
 
         self.encoder.apply(he_init)

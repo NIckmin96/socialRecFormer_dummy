@@ -48,12 +48,12 @@ class ItemNodeEncoder(nn.Module):
         return input_embedding
     
 class RatingEncoder(nn.Module):
-    def __init__(self, num_nodes, num_items, d_model):
+    def __init__(self, num_nodes, len_item_seq, d_model):
         super(RatingEncoder, self).__init__()
         self.num_nodes = num_nodes
-        self.num_items = num_items
+        self.len_item_seq = len_item_seq
         self.user_bias = nn.Embedding(num_nodes+1, d_model) # 0 : cold start user
-        self.rating_fc = nn.Linear(num_items, d_model)
+        self.rating_fc = nn.Linear(len_item_seq, d_model)
 
     def forward(self, batched_data, is_train=True):
         user_id = batched_data["user_seq"] # bs x u
@@ -64,14 +64,14 @@ class RatingEncoder(nn.Module):
             device = user_id.device
 
             bs,u,i = item_rating.size()
-            if i != self.num_items:
-                index = torch.stack([torch.arange(i) for _ in range(u)])
-                index = torch.stack([index for _ in range(bs)]).to(device)
+            if i != self.len_item_seq:
+                index = torch.stack([torch.arange(i) for _ in range(u)]) # u x i
+                index = torch.stack([index for _ in range(bs)]).to(device) # bs x u x i
                 item_rating = torch.zeros(bs, u, self.num_items, dtype=item_rating.dtype, device=device).scatter(-1,index,item_rating) # num item 사이즈 맞추고 부족한 부분 zero padding
                 item_rating = item_rating.float()
 
             
-            rating_bias = self.rating_fc(item_rating)
+            rating_bias = self.rating_fc(item_rating.float())
             rating_embedding = (user_bias + rating_bias)
         else:
             rating_embedding = user_bias
@@ -92,14 +92,12 @@ class RatingBias(nn.Module):
         return attn_bias
     
 class RankBias(nn.Module):
-    def __init__(self, num_heads, rating_thres):
+    def __init__(self, rating_thres):
         super(RankBias, self).__init__()
-        self.num_heads=num_heads
         self.rating_thres=rating_thres
 
     def forward(self, imp_fdback):
         rank_bias = imp_fdback
         rank_bias = torch.where(rank_bias<self.rating_thres, 0, 1)
-        rank_bias = rank_bias.unsqueeze(1).expand(-1, self.num_heads, -1)
 
         return rank_bias
