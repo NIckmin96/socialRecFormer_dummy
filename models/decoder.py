@@ -11,7 +11,7 @@ class Decoder(nn.Module):
     Decoder for modeling item representation (in user-item graph),
     and perform rating prediction
     """
-    def __init__(self, num_user, num_item, max_degree, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, num_user, num_item, max_degree, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk, args):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -48,7 +48,8 @@ class Decoder(nn.Module):
             ) for _ in range(num_layers)]
         )
 
-        self.rating_embed = RatingEncoder(num_user, num_item, d_model)
+        len_item_seq = args.user_seq_len*args.item_per_user
+        self.rating_embed = RatingEncoder(num_user, len_item_seq, d_model)
         self.relation_bias = RatingBias(num_heads=num_heads)
 
         # rating prediction layer

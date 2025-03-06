@@ -27,7 +27,7 @@ ciao={
             "learning_rate":0.0001,
             "warmup":40, 
             "lr_decay":"linear",
-            "weight_decay":1e-2,
+            "weight_decay":1e-1,
             "num_epochs":100,
             "patience":10, 
             "alpha":1,
@@ -65,7 +65,7 @@ epinions={
             "learning_rate":0.0001,
             "warmup":80, 
             "lr_decay":"linear",
-            "weight_decay":1e-2,
+            "weight_decay":1e-1,
             "eval_frequency":400, 
             "num_epochs":100,
             "num_eval_steps":849,   # total_valid_sample / total_epoch

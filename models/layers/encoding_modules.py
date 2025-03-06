@@ -144,55 +144,35 @@ class RatingEncoder(nn.Module):
     """
     Encoder item's rating information to dense representation, using `batched_data['rating']`.
     """
-    def __init__(self, num_nodes, num_items, d_model):
+    def __init__(self, num_nodes, len_item_seq, d_model):
         super(RatingEncoder, self).__init__()
 
         # TODO: Use embedding table later? embedding shape [num_rating, d_model] ?
         self.num_nodes = num_nodes
-        self.num_items = num_items
+        self.len_item_seq = len_item_seq
         self.user_bias = nn.Embedding(num_nodes+1, d_model) # 0 : cold start user
-        # self.user_bias = SocialNodeEncoder() # 0 : cold start user
-        # self.rating = nn.Embedding(6, d_model, padding_idx=0) # 0(no rating) : user bias only
-        self.rating_fc = nn.Linear(num_items, d_model)
+        self.rating_fc = nn.Linear(len_item_seq, d_model)
 
     def forward(self, batched_data, is_train=True):
-        """
-        batched_data: batched data from DataLoader
-        """
-        # [FIXME] explicit rating prediction에서 implicit rating을 정답값으로 사용하는 것도 말이 안됨
         user_id = batched_data["user_seq"] # bs x u
-        item_rating = batched_data['item_rating'] # bs x u x i
-        device = user_id.device
-
-        bs,u,i = item_rating.size()
-        if i != self.num_items:
-            index = torch.stack([torch.arange(i) for _ in range(u)])
-            index = torch.stack([index for _ in range(bs)]).to(device)
-            item_rating = torch.zeros(bs, u, self.num_items, dtype=item_rating.dtype, device=device).scatter(-1,index,item_rating) # num item 사이즈 맞추고 부족한 부분 zero padding
-            item_rating = item_rating.float()
-
         user_bias = self.user_bias(user_id)
-        rating_bias = self.rating_fc(item_rating)
-        # rating_bias = torch.sum(self.rating(item_rating), dim=2)
-        # attn_bias = item_rating.expand(-1,self.num_heads,-1,-1)
-        # rating_embedding = torch.cat([user_bias, rating_bias], dim=-1) # bs x seq_len x d_model
+        
         if is_train:
+            item_rating = batched_data['item_rating'] # bs x u x i
+            device = user_id.device
+
+            bs,u,i = item_rating.size()
+            if i != self.len_item_seq:
+                index = torch.stack([torch.arange(i) for _ in range(u)]) # u x i
+                index = torch.stack([index for _ in range(bs)]).to(device) # bs x u x i
+                item_rating = torch.zeros(bs, u, self.num_items, dtype=item_rating.dtype, device=device).scatter(-1,index,item_rating) # num item 사이즈 맞추고 부족한 부분 zero padding
+                item_rating = item_rating.float()
+
+            
+            rating_bias = self.rating_fc(item_rating.float())
             rating_embedding = (user_bias + rating_bias)
         else:
             rating_embedding = user_bias
-
-        # [batch_size, seq_length_user, seq_length_item] 
-        ###### FIXME: 정답인 rating 정보를 바로 주는건 말이 X. 따라서 상호작용 여부(0 or 1)로 주자.       
-        # item_rating = batched_data['item_rating']
-        # item_rating = torch.where(item_rating == 0, 0, 1)
-        ######
-
-        # Q*K^T 를 수행하면 [batch_size, num_heads, seq_length_item, seg_length_user]
-        # 여기에 bias term으로 더해주므로 [batch_size, seq_length_user, seq_length_item] ==> [batch_size, num_heads, seq_length_user, seq_length_item] 이 되어야 함. -> decoder 부분에서 수행
-            # [batch_size, seq_length_user, seq_length_item] 
-            # ==> [num_heads, batch_size, seq_length_user, seq_length_item]
-            # ==> [batch_size, seq_length_user, seq_length_item, num_heads]
-        # attn_bias = item_rating.repeat(self.num_heads, 1, 1, 1).permute(1, 2, 3, 0)
 
         return rating_embedding
 

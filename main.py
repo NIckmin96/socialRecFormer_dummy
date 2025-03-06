@@ -49,19 +49,25 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-# def MaskedMSELoss(target, prediction):
-#     """
-#     Compute Masked MSELoss
-#     """
-#     mask = (target != 0).float()
-#     squared_diff = (prediction - target)**2 * mask
-#     loss = torch.sum(squared_diff) / torch.sum(mask)
+def MAE(pred, y, mask=None):
+    if mask==None:
+        mask = torch.ones_like(pred).long()
+    
+    return F.l1_loss(pred[mask].float(), y[mask].float(), reduction='mean')
 
-#     return loss
+def MSE(pred, y, mask=None):
+    if mask==None:
+        mask = torch.ones_like(pred).long()
+    
+    return F.mse_loss(pred[mask].float(), y[mask].float(), reduction='mean')
+
+def RMSE(pred, y, mask=None):
+    if mask==None:
+        mask = torch.ones_like(pred).long()
+
+    return torch.sqrt(MSE(pred, y, mask))
 
 def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt):
-    # val_rmse = []
-    # val_mae = []
     criterion = nn.MSELoss()
     eval_losses = AverageMeter()
     model.eval()
@@ -91,18 +97,16 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
                 # 따라서 Masked MSELoss를 사용.
                 # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산.
             
-            #print(batch['item_rating'].shape)
             batch['item_rating'] = batch['item_rating'][:,0] 
-            #print(batch['item_rating'].shape)
             outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            #print(outputs.shape)
-            
             mask = (batch['item_rating'] != 0)
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            loss = torch.sum(squared_diff) / torch.sum(mask)
-            loss = torch.sqrt(loss) # dev
-            #loss = criterion(outputs[mask].float(),batch['item_rating'][mask].float()).cuda()
+
+            # squared_diff = (outputs - batch['item_rating'])**2 * mask
+            # loss = torch.sum(squared_diff) / torch.sum(mask)
+            # loss = torch.sqrt(loss) # dev
+
+            # [DEV]
+            loss = RMSE(outputs, batch['item_rating'], mask)
 
             loss += enc_loss
             loss += dec_loss
@@ -141,7 +145,9 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
         mse = F.mse_loss(pred[msk].float(), trg[msk].float(), reduction='none')
         total_rmse = torch.sqrt(mse.mean())
         total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
-        rmse = torch.sqrt(torch.mean(torch.pow((pred[msk].float() - trg[msk].float()), 2)))
+        
+        total_rmse = RMSE(pred, trg, msk)
+        total_mae = MAE(pred, trg, msk)
 
         # baseline의 metric보다 낮은 경우
         if (torch.mean(total_rmse, dim=0).item()<baseline_rmse) & (torch.mean(total_mae, dim=0).item()<baseline_mae):
@@ -204,6 +210,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     for epoch in range(total_epochs):
         lr_lst = []
         losses = AverageMeter()
+        org_losses = AverageMeter()
+        enc_losses = AverageMeter()
+        dec_losses = AverageMeter()
         epoch_iterator = tqdm(ds_iter['train'],
                             desc="Training (X / X Steps) (loss=X.X)",
                             bar_format="{l_bar}{r_bar}",
@@ -229,6 +238,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             org_loss = torch.sum(squared_diff) / torch.sum(mask)
             org_loss = torch.sqrt(org_loss) # RMSE
+            # [DEV]
+            org_loss = RMSE(outputs, batch['item_rating'], mask)
 
             batch['item_rating'] = batch['item_rating'][:,0] 
             outputs = outputs[:,0]
@@ -240,10 +251,10 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             # loss =  org_loss + new_loss * training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"] 
             
             # [ORG]
-            loss = org_loss*training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"]
+            # loss = org_loss*training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"]
             
             # [DEV]
-            # loss = org_loss*training_config["alpha"] + enc_loss * training_config["beta"] 
+            loss = org_loss*training_config["alpha"]
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -251,6 +262,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             optimizer.zero_grad()
 
             losses.update(loss)
+            org_losses.update(org_loss)
+            # enc_losses.update(enc_loss)
+            # dec_losses.update(dec_loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
@@ -259,8 +273,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
-        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
-        # lr_scheduler.step() # else
+        # lr_scheduler.step(valid_loss) # ReduceLROnPlateau
+        lr_scheduler.step() # else
         model.train()
         start.record(stream)
 
@@ -269,6 +283,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
+        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || ENC Loss: {enc_losses.avg:.4f} || DEC Loss: {dec_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
         if epoch > 100:
             break
@@ -368,7 +383,7 @@ def get_args():
     parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
     parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
-    parser.add_argument('--topk', type=int, default=1, help="MoE number of routers")
+    parser.add_argument('--topk', type=int, default=2, help="MoE number of routers")
     parser.add_argument('--lr', type=float, default=1e-4)
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
@@ -399,15 +414,13 @@ def main():
 
     training_config["learning_rate"] = args.lr
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    # model_config["num_layers_enc"] = int(math.log(args.train_augs+1,3)*args.num_layers_enc)
-    # model_config["num_layers_dec"] = int(math.log(args.train_augs+1,3)*args.num_layers_dec)
-    # [DEV]
     model_config["num_layers_enc"] = args.num_layers_enc + int(math.log(args.train_augs,2))
     model_config["num_layers_dec"] = args.num_layers_dec + int(math.log(args.train_augs,2))
     
     # model expansion (2) : MoE topk router
     model_config["n_experts"] = args.n_experts
-    model_config["topk"] = args.topk
+    # model expansion (2)-2 : MoE topk # of experts
+    model_config["topk"] = args.topk + int(math.log(args.train_augs,2))
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -427,7 +440,7 @@ def main():
     ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
 
     print(model_config)
-    model = Transformer(**model_config)
+    model = Transformer(**model_config, args=args)
 
     # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
@@ -545,13 +558,6 @@ def main():
     total_train_samples = len(train_ds)
     # training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs) # why divisor = 'total_epochs' not 'batch_size'???
     training_config["num_train_steps"] = len(ds_iter['train'])
-    
-
-    # lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-7, max_lr=1e-4, mode='triangular', step_size_up=5, cycle_momentum=False)
-    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-7)
-
-    # [DEV] epinions
-    # lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch:0.95**epoch)
 
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
@@ -562,18 +568,19 @@ def main():
         min_lr = 1e-6,
         verbose = True
     )
-    
-    # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
-    #     optimizer = optimizer,
-    #     max_lr = training_config["learning_rate"],
-    #     # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
-    #     pct_start = 0.15,
-    #     # anneal_strategy = training_config["lr_decay"],
-    #     anneal_strategy = 'cos',
-    #     epochs = training_config["num_epochs"],
-    #     # steps_per_epoch = 2 * len(ds_iter['train'])
-    #     steps_per_epoch = len(ds_iter['train'])
-    # )
+
+    # [DEV]
+
+    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
+        optimizer = optimizer,
+        max_lr = training_config["learning_rate"],
+        epochs=training_config["num_epochs"],
+        steps_per_epoch=training_config["num_train_steps"],
+        pct_start = 0.3,
+        anneal_strategy = training_config["lr_decay"],
+        div_factor = 100,
+        final_div_factor = 100
+    )
 
 
     ### TensorBoard writer preparation ###
@@ -589,8 +596,6 @@ def main():
     print(json.dumps(args.__dict__, indent = 4))
 
     print(json.dumps([model_config, training_config], indent = 4))
-
-    # print(model)
 
     ### eval ###
     print(checkpoint_path)

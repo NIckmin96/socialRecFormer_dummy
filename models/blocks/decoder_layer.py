@@ -54,8 +54,8 @@ class DecoderLayer(nn.Module):
         if enc_output is not None:
             residual = x
             
-            enc_output = self.norm2(enc_output)
             enc_output = enc_output + rating_x
+            enc_output = self.norm2(enc_output)
             x = self.norm2(x)
 
             # print("     Start cross attention....")

@@ -445,11 +445,8 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
     elif split=='valid':
         total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
     else:
-        if test_augs:
-            test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
-            total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
-        else:
-            total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test.pkl"
+        test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
+        total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(not regenerate):
@@ -521,7 +518,6 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         print("Processing Item sequences / Degrees ...")
         # total_df['item_sequences'] = total_df['user_sequences'].progress_map(lambda seq:list(map(lambda x:user_product_dic[x], seq)))
         total_df['item_sequences'] = total_df['user_sequences'].progress_map(lambda seq:list(map(map_user_item, seq)))
-        # print(total_df['item_sequences'][0])
         total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:sum(x,start=[])).map(lambda x:list(set(x)-set([0])))
         total_df['item_degree'] = total_df['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
         # slice item & degree
@@ -529,7 +525,6 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df = total_df.explode(['item_sequences','item_degree']).reset_index(drop=True)
-        # print(total_df.shape)
         # spd matrix
         print("Processing Spd Matrix ...")
         total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
