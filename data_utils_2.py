@@ -152,9 +152,6 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False
         rating_test_set = split_rating_df.iloc[:num_test]
         rating_train_set = split_rating_df.iloc[num_test:]
 
-        # rating_test_set = split_rating_df[split_rating_df['user_id'].isin(test_users)]
-        # rating_train_set = split_rating_df[split_rating_df['user_id'].isin(train_users)]
-
         rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
 
@@ -480,7 +477,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.
         rating_matrix = np.load(data_path + '/rating_matrix.npy')
         
-        # str type으로 저장된 데이터 list로 변환
+        # str type으로 저장된 데이터 list로 변환 
         user_df['random_walk_seq'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
         user_df['degree'] = user_df.apply(lambda x: str_to_list(x['degree']), axis=1)
 

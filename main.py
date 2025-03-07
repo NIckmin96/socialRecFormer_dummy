@@ -498,28 +498,28 @@ def main():
     total_train_samples = len(train_ds)
     training_config["num_train_steps"] = len(ds_iter['train'])
 
-    # lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    #     optimizer = optimizer,
-    #     mode = 'min',
-    #     factor = 0.85,
-    #     patience = 3,
-    #     threshold = 1e-2,
-    #     min_lr = 1e-6,
-    #     verbose = True
-    # )
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer = optimizer,
+        mode = 'min',
+        factor = 0.85,
+        patience = 3,
+        threshold = 1e-2,
+        min_lr = 1e-6,
+        verbose = True
+    )
 
     # [DEV]
 
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
-        optimizer = optimizer,
-        max_lr = training_config["learning_rate"],
-        epochs=training_config["num_epochs"],
-        steps_per_epoch=training_config["num_train_steps"],
-        pct_start = 0.3,
-        anneal_strategy = training_config["lr_decay"],
-        div_factor = 100,
-        final_div_factor = 100
-    )
+    # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
+    #     optimizer = optimizer,
+    #     max_lr = training_config["learning_rate"],
+    #     epochs=training_config["num_epochs"],
+    #     steps_per_epoch=training_config["num_train_steps"],
+    #     pct_start = 0.15,
+    #     anneal_strategy = training_config["lr_decay"],
+    #     div_factor = 100,
+    #     final_div_factor = 100
+    # )
     
     # lr_scheduler = CosineAnnealingWarmUpRestarts(optimizer=optimizer,
     #                                              T_0=10,

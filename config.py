@@ -12,25 +12,22 @@ ciao={
             "num_item": 105114,
             "max_item_degree": 915,
             "max_spd_value": 15,
-            # "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
-            # "d_ffn": 256,            # FFN dim
-            # "num_heads": 4,
             "num_layers_enc": 3,
             "num_layers_dec": 6,
-            "d_model": 256,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
-            "d_ffn": 512,            # FFN dim
+            "d_model": 128,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
+            "d_ffn": 256,            # FFN dim
             "num_heads": 8,
-            "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
             "n_experts": 8,
             "topk": 2
          },
          "training":{
-            "batch_size":256,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)
+            "batch_size":128,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)
             "optimizer":"adamw",
             "learning_rate":0.0001,
             "warmup":40, 
             "lr_decay":"cos",
-            "weight_decay":1.489e-2,
+            "weight_decay":0.1,
             "num_epochs":100,
             "patience":10, 
             "alpha":1,

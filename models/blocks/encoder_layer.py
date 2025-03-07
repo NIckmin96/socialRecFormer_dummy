@@ -18,28 +18,24 @@ class EncoderLayer(nn.Module):
         self.norm1 = nn.LayerNorm(d_model)
 
         self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
-        self.norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(p=dropout)
-        self.leaky_relu = nn.LeakyReLU()
+        self.norm2 = nn.LayerNorm(d_model)
     
     def forward(self, x, src_mask, attn_bias):
         # 1. Perform self attention
         residual = x
-        x, spd_loss = self.attention(Q=x, K=x, V=x, mask=src_mask, attn_bias=attn_bias)
-        x = self.dropout1(x)
-
-        # 2. Add & Norm
-        x = x + residual
         x = self.norm1(x)
-        x = self.leaky_relu(x)
+        x, spd_loss = self.attention(Q=x, K=x, V=x, mask=src_mask, attn_bias=attn_bias)
+        # Add & Norm
+        x = self.dropout1(x)
+        x = x + residual
 
         # 3. FFN
         residual = x
-        x = self.moe(x)
-        x = self.dropout2(x)
-
-        # 4. Add & Norm
-        x = x + residual
         x = self.norm2(x)
+        x = self.moe(x)
+        # Add & Norm
+        x = self.dropout2(x)
+        x = x + residual
 
         return x, spd_loss

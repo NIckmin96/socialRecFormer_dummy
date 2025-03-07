@@ -60,25 +60,22 @@ class DecoderLayer(nn.Module):
         
         # 1-1. Self-Attention
         residual = x_item
+        x_item = self.norm_self(x_item)
         x, _ = self.attention(Q=x_item, K=x_item, V=x_item, mask=self_attn_mask, attn_bias=None)
         x = self.dropout_self(x)
-        # Add & Norm
         x = x + residual
-        x = self.norm_self(x)
-        x = self.act_self(x)
         
         # 1-2. FFN
         residual = x
+        x = self.norm_self_fc(x)
         x = self.moe(x)
         x = self.dropout_self_fc(x)
-        # Add & Norm
         x = x + residual
-        x = self.norm_self_fc(x)
-        x = self.act_self_fc(x)
         
         # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
         residual = x
         enc_output = enc_output + rating_x # rating 정보 추가
+        x = self.norm_cross1(x)
         
         if not self.last_layer_flag:
             x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
@@ -86,41 +83,32 @@ class DecoderLayer(nn.Module):
             # 7. last layer returns predicted ratings.
             x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
         x = self.dropout_cross1(x)
-        # Add & Norm
         x = x + residual
-        x = self.norm_cross1(x)
-        x = self.act_cross1(x)
     
         # 2-2. FFN
         residual = x
+        x = self.norm_cross1_fc(x)
         x = self.moe(x)
         x = self.dropout_cross1_fc(x)
-        # Add & Norm
         x = x + residual
-        x = self.norm_cross1_fc(x)
-        x = self.act_cross1_fc(x)
         
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
         residual = x
         x = x + x_anchor_i # user-item representation + anchor user기준 item embeddings
+        x = self.norm_cross2(x)
         new_enc_output = enc_output + x_anchor.expand(-1,enc_output.size(1),-1)
         x, _ = self.cross_attention2(Q=x, K=new_enc_output, V=new_enc_output, mask=cross_attn_mask_2, attn_bias=None)
         # Ranking loss(BCE)
         bce_loss = F.binary_cross_entropy_with_logits(torch.mean(x, dim=-1).float(), ranking_bias.float(), reduction='mean')
         x = self.dropout_cross2(x)
-        # Add & Norm
         x = x + residual
-        x = self.norm_cross2(x)
-        x = self.act_cross2(x)
     
         # 3-2. FFN
         residual = x
+        x = self.norm_cross2_fc(x)
         x = self.moe(x)
         x = self.dropout_cross2_fc(x)
-        # Add & Norm
         x = x + residual
-        x = self.norm_cross2_fc(x)
-        x = self.act_cross2_fc(x)
         
         if self.last_layer_flag:
             return rating_pred, bce_loss, rmse_loss 
