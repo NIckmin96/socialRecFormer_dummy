@@ -97,8 +97,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
                 # 따라서 Masked MSELoss를 사용.
                 # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산.
             
-            batch['item_rating'] = batch['item_rating'][:,0] 
-            outputs = outputs[:,0]
+            # batch['item_rating'] = batch['item_rating'][:,0] 
+            # outputs = outputs[:,0]
             mask = (batch['item_rating'] != 0)
 
             # squared_diff = (outputs - batch['item_rating'])**2 * mask
@@ -108,8 +108,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             # [DEV]
             loss = RMSE(outputs, batch['item_rating'], mask)
 
-            loss += enc_loss
-            loss += dec_loss
+            # loss += enc_loss
+            # loss += dec_loss
             
             eval_losses.update(loss)
             
@@ -235,18 +235,18 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                         
             ####### dec_loss
             mask = (batch['item_rating'] != 0)
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            org_loss = torch.sum(squared_diff) / torch.sum(mask)
-            org_loss = torch.sqrt(org_loss) # RMSE
+            # squared_diff = (outputs - batch['item_rating'])**2 * mask
+            # org_loss = torch.sum(squared_diff) / torch.sum(mask)
+            # org_loss = torch.sqrt(org_loss) # RMSE
             # [DEV]
             org_loss = RMSE(outputs, batch['item_rating'], mask)
 
             batch['item_rating'] = batch['item_rating'][:,0] 
             outputs = outputs[:,0]
             
-            mask = (batch['item_rating'] != 0)
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            new_loss = torch.sum(squared_diff) / torch.sum(mask)
+            # mask = (batch['item_rating'] != 0)
+            # squared_diff = (outputs - batch['item_rating'])**2 * mask
+            # new_loss = torch.sum(squared_diff) / torch.sum(mask)
 
             # loss =  org_loss + new_loss * training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"] 
             
@@ -273,8 +273,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
-        # lr_scheduler.step(valid_loss) # ReduceLROnPlateau
-        lr_scheduler.step() # else
+        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
+        # lr_scheduler.step() # else
         model.train()
         start.record(stream)
 
@@ -334,12 +334,12 @@ def eval(model, ds_iter):
                 # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
                 # 따라서 Masked MSELoss를 사용
                 # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산하게 된다.
-            batch['item_rating'] = batch['item_rating'][:,0] 
-            outputs = outputs[:,0]            
+            # batch['item_rating'] = batch['item_rating'][:,0] 
+            # outputs = outputs[:,0]            
             mask = (batch['item_rating'] != 0)
             squared_diff = (outputs - batch['item_rating'])**2 * mask
             loss = torch.sum(squared_diff) / torch.sum(mask)
-            loss += enc_loss
+            # loss += enc_loss
             # loss += dec_loss
             eval_losses.update(loss)
             
@@ -380,8 +380,8 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
+    parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
+    parser.add_argument('--num_layers_dec', type=int, default=6, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of routers")
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -571,16 +571,16 @@ def main():
 
     # [DEV]
 
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
-        optimizer = optimizer,
-        max_lr = training_config["learning_rate"],
-        epochs=training_config["num_epochs"],
-        steps_per_epoch=training_config["num_train_steps"],
-        pct_start = 0.3,
-        anneal_strategy = training_config["lr_decay"],
-        div_factor = 100,
-        final_div_factor = 100
-    )
+    # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
+    #     optimizer = optimizer,
+    #     max_lr = training_config["learning_rate"],
+    #     epochs=training_config["num_epochs"],
+    #     steps_per_epoch=training_config["num_train_steps"],
+    #     pct_start = 0.15,
+    #     anneal_strategy = training_config["lr_decay"],
+    #     div_factor = 100,
+    #     final_div_factor = 100
+    # )
 
 
     ### TensorBoard writer preparation ###

@@ -11,14 +11,14 @@ class EncoderLayer(nn.Module):
     def __init__(self, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1):
         super(EncoderLayer, self).__init__()
 
-        self.norm1 = nn.LayerNorm(d_model)
         self.attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout1 = nn.Dropout(p=dropout)
+        self.norm1 = nn.LayerNorm(d_model)
 
-        self.norm2 = nn.LayerNorm(d_model)
         self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
-        # self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
         self.dropout2 = nn.Dropout(p=dropout)
+        self.norm2 = nn.LayerNorm(d_model)
+        # self.ffn = FeedForwardNetwork(d_model=d_model, ffn_size=d_ffn, dropout=dropout)
     
     def forward(self, x, src_mask, attn_bias):
         # 1. Perform self attention

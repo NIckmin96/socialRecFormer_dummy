@@ -142,15 +142,13 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False
     else:
         print("Creating Rating split sets...")
         rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
+        rating_df = rating_df.drop_duplicates(subset=['user_id','product_id'],keep='first')
         ### train test split TODO: Change equation for split later on    
         split_rating_df = shuffle(rating_df, random_state=seed)
         num_test = int(len(split_rating_df)*test)
         
         rating_test_set = split_rating_df.iloc[:num_test]
         rating_train_set = split_rating_df.iloc[num_test:]
-
-        # rating_test_set = split_rating_df[split_rating_df['user_id'].isin(test_users)]
-        # rating_train_set = split_rating_df[split_rating_df['user_id'].isin(train_users)]
 
         rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
@@ -165,17 +163,23 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
     Generate social graph from train/test/validation dataset
     """
     split_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
-    if not os.path.isfile(split_file) or regenerate:
+    rating_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
+    if (not os.path.isfile(split_file)) or regenerate:
+        print(f"Creating Social {split} split sets...")
         trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
         social_split = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
+        # social 기준으로 rating split file re-filtering
+        unique_users = list(set(social_split['user_id_1'].unique()).union(set(social_split['user_id_2'].unique())))
+        rating_split = rating_split[rating_split.user_id.isin(unique_users)]
         # save
         social_split.to_csv(split_file)
+        rating_split.to_csv(rating_file, index=False)
     else:
         social_split = pd.read_csv(split_file)
+        rating_split = pd.read_csv(rating_file)
     
-    return social_split
-
+    return social_split, rating_split
 def generate_user_degree_table(data_path:str, trust_split, split:str='train', seed:int=42, regenerate=False) -> pd.DataFrame:
     """
     Generate & return degree table from social graph(trustnetwork).

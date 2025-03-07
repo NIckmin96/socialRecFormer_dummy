@@ -44,7 +44,6 @@ class DecoderLayer(nn.Module):
         residual = x
         x = self.norm1(x)
         x, _ = self.attention(Q=x, K=x, V=x, mask=trg_mask, attn_bias=None)
-        # quit()
 
         # 2. Add & Norm
         x = self.dropout1(x)
@@ -53,14 +52,13 @@ class DecoderLayer(nn.Module):
         # 3. Encoder-Decoder Cross-Attention (bias here)
         if enc_output is not None:
             residual = x
-            
             enc_output = enc_output + rating_x
-            enc_output = self.norm2(enc_output)
             x = self.norm2(x)
+            x, loss = self.cross_attention(Q=x, K=enc_output, V=enc_output, mask=src_mask, attn_bias=attn_bias)
+            # enc_output = self.norm2(enc_output)
 
             # print("     Start cross attention....")
             # print(f"     enc_output: {enc_output.shape} /// self-attn output: {x.shape} /// src_mask: {src_mask.shape}")
-            x, loss = self.cross_attention(Q=x, K=enc_output, V=enc_output, mask=src_mask, attn_bias=attn_bias)
 
             # 4. Add & Norm
             # print(f"********* After cross attn: x {x.shape}, residual {residual.shape}")
@@ -71,8 +69,8 @@ class DecoderLayer(nn.Module):
             # 5. FFN
             residual = x
             x = self.norm3(x)
-            # x = self.ffn(x)
             x = self.moe(x)
+            # x = self.ffn(x)
 
             # 6. Add & Norm
             x = self.dropout3(x)

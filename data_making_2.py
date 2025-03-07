@@ -10,12 +10,11 @@ class DatasetMaking:
         self.rating_df, self.trust_df = utils.mat_to_csv(data_path)
         
         # Shuffle and split Rating dataframe
-        # self.rating_train, self.rating_valid, self.rating_test = utils.shuffle_and_split_dataset(data_path, seed=seed)
         self.rating_train, self.rating_test = utils.shuffle_and_split_dataset(data_path, seed=seed, regenerate=regenerate)
 
         # Filter Social dataframe by Rating dataframe and Split
-        self.social_train = utils.generate_social_dataset(data_path, 'train', self.rating_train, seed=seed, regenerate=regenerate)
-        self.social_test = utils.generate_social_dataset(data_path, 'test', self.rating_test, seed=seed, regenerate=regenerate)
+        self.social_train, self.rating_train = utils.generate_social_dataset(data_path, 'train', self.rating_train, seed=seed, regenerate=regenerate)
+        self.social_test, self.rating_test = utils.generate_social_dataset(data_path, 'test', self.rating_test, seed=seed, regenerate=regenerate)
         # self.social_valid = utils.generate_social_dataset(data_path, 'valid', self.rating_valid, seed=seed)
 
         # User Degree Table
