@@ -19,13 +19,19 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import data_making_2 as dm
-# from utils import redirect_stdout
 from utils import *
 from config import Config
 from dataset import MyDataset
 from models.transformer import Transformer
 from scheduler import WarmupCosineSchedule
-import requests
+
+# Ray Tune
+from ray import tune
+from ray import train
+from ray.train import Checkpoint, get_checkpoint
+from ray.tune.schedulers import ASHAScheduler
+import ray.cloudpickle as pickle
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -484,18 +490,16 @@ def main():
             "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4)
     }
 
-    ### training preparation ###
+    ############################################################ training preparation ############################################################
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr = training_config["learning_rate"],
-        betas = (0.9, 0.999), eps = 1e-6, weight_decay = training_config["weight_decay"]
+        betas=(0.9, 0.999), eps=1e-6, weight_decay=training_config["weight_decay"]
     )
 
     # total_steps는 cycle당 있는 step 수. 없다면 epoch와 steps_per_epoch를 전댈해야함.
         # steps_per_epoch는 한 epoch에서의 전체 step 수: (total_number_of_train_samples / batch_size)
-    total_epochs = training_config["num_epochs"]
-    total_train_samples = len(train_ds)
     training_config["num_train_steps"] = len(ds_iter['train'])
 
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -506,6 +510,27 @@ def main():
         threshold = 1e-2,
         min_lr = 1e-6,
         verbose = True
+    )
+
+    ray_config = {
+        "d_model" : tune.grid_search([64, 128, 256]),
+        "d_ffn" : tune.grid_search([256, 512, 1024]),
+        "num_heads": tune.grid_search([4,8]),
+        "topk" : tune.grid_search([1,2,3]),
+        "dropout" : tune.uniform(0.1,0.3),
+        "weight_decay": tune.uniform(0.01, 0.1)
+    }
+
+    ray_scheduler = ASHAScheduler(
+        metric="loss",
+        mode="min",
+        max_t=training_config["num_epochs"]
+    )
+    
+    result = tune.run(
+        train,
+        config=ray_config,
+        checkpoint_at_end=True
     )
 
     # [DEV]
