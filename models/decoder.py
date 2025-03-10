@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from models.blocks.decoder_layer import DecoderLayer
 from models.layers.encoding_modules import SocialNodeEncoder, ItemNodeEncoder, RatingEncoder, RatingBias, RankBias
@@ -91,17 +92,19 @@ class Decoder(nn.Module):
         bce_losses = []; rmse_losses = []
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
-            x_item, bce_loss, rmse_loss = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
+            x_item, bce_loss, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
             bce_losses.append(bce_loss)
             rmse_losses.append(rmse_loss)
         
         # Pass to prediction layer
-        output, bce_loss, rmse_loss = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
+        output, bce_loss, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
         bce_losses.append(bce_loss)
         rmse_losses.append(rmse_loss)
         
-        
+        # [bs, i, d] => [bs, i]
+        output = torch.mean(output, dim=-1)
+        rank_logits = F.sigmoid(output)
 
         del self_attn_mask, cross_attn_mask_1, cross_attn_mask_2
 
-        return output, sum(bce_losses)/len(bce_losses), sum(rmse_losses)/len(rmse_losses)
+        return rank_logits, rating_pred, sum(bce_losses)/len(bce_losses), sum(rmse_losses)/len(rmse_losses)

@@ -57,6 +57,7 @@ class DecoderLayer(nn.Module):
     def forward(self, x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias):
         # tmp
         bce_loss, rmse_loss = 0,0
+        rating_pred = None
         
         # 1-1. Self-Attention
         residual = x_item
@@ -109,7 +110,4 @@ class DecoderLayer(nn.Module):
         x = self.dropout_cross2_fc(x)
         x = x + residual
         
-        if self.last_layer_flag:
-            return rating_pred, bce_loss, rmse_loss 
-        else:
-            return x, bce_loss, rmse_loss
+        return x, bce_loss, rmse_loss, rating_pred

@@ -81,20 +81,17 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
             batch['imp_fdback'] = batch['imp_fdback'].to(device)
 
-            outputs, enc_loss, dec_bce, dec_rmse = model(batch, is_train=False)
-            
+            rank_logits, rating_pred, enc_loss, dec_bce, dec_rmse = model(batch, is_train=False)
+            # rmse loss 계산(Rating)
             mask = (batch['item_rating'] != 0)
-            
-            org_loss = RMSE(outputs, batch['item_rating'], mask)
-
+            org_loss = RMSE(rating_pred, batch['item_rating'], mask)
             loss = org_loss + dec_bce
-            # loss = org_loss
             
             eval_losses.update(loss)
             org_losses.update(org_loss)
             dec_losses.update(dec_bce)
             
-            pred.append(outputs)
+            pred.append(rating_pred)
             trg.append(batch['item_rating'])
             msk.append(mask)
 
@@ -190,11 +187,11 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             batch['imp_fdback'] = batch['imp_fdback'].to(device)
 
             # forward pass
-            outputs, enc_loss, dec_bce, dec_rmse = model(batch)
+            rank_logits, rating_pred, enc_loss, dec_bce, dec_rmse = model(batch)
 
             # compute loss
             mask = (batch['item_rating'] != 0)
-            org_loss = RMSE(outputs, batch['item_rating'], mask)
+            org_loss = RMSE(rating_pred, batch['item_rating'], mask)
             
             # loss = org_loss + enc_loss + dec_bce + dec_rmse
             loss = org_loss + dec_bce
@@ -277,15 +274,15 @@ def eval(model, ds_iter):
             batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
             batch['imp_fdback'] = batch['imp_fdback'].to(device)
             
-            outputs, enc_loss, dec_bce, dec_rmse = model(batch, is_train=False)
+            rank_logits, rating_pred, enc_loss, dec_bce, dec_rmse = model(batch, is_train=False)
             mask = (batch['item_rating'] != 0)
             
-            loss = RMSE(outputs, batch['item_rating'], mask)
+            loss = RMSE(rating_pred, batch['item_rating'], mask)
             # loss += enc_loss
             loss += dec_bce
             eval_losses.update(loss)
             
-            pred.append(outputs)
+            pred.append(rating_pred)
             trg.append(batch['item_rating'])
             msk.append(mask)
 
