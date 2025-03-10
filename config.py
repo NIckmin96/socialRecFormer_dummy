@@ -12,22 +12,22 @@ ciao={
             "num_item": 105114,
             "max_item_degree": 915,
             "max_spd_value": 15,
-            "num_layers_enc": 3,
-            "num_layers_dec": 6,
-            "d_model": 128,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
             "d_ffn": 256,            # FFN dim
-            "num_heads": 8,
-            "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "num_heads": 4,
+            "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "num_layers_enc": 4,
+            "num_layers_dec": 4,
             "n_experts": 8,
-            "topk": 2
+            "topk": 1
          },
          "training":{
             "batch_size":128,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)
             "optimizer":"adamw",
             "learning_rate":0.0001,
             "warmup":40, 
-            "lr_decay":"cos",
-            "weight_decay":0.1,
+            "lr_decay":"linear",
+            "weight_decay":1e-1,
             "num_epochs":100,
             "patience":10, 
             "alpha":1,
@@ -53,11 +53,11 @@ epinions={
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
-            "dropout": 0.3,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
             "num_layers_enc": 4,
             "num_layers_dec": 4,
             "n_experts": 8,
-            "topk": 2
+            "topk": 1
          },
          "training":{
             "batch_size":128,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)

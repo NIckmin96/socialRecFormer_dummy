@@ -40,8 +40,8 @@ class Transformer(nn.Module):
             args=args
         )
 
-        self.encoder.apply(he_init)
-        self.decoder.apply(he_init)
+        # self.encoder.apply(he_init)
+        # self.decoder.apply(he_init)
     
     def forward(self, batched_data, is_train=True):
         enc_output, enc_loss, user_embed = self.encoder(batched_data)

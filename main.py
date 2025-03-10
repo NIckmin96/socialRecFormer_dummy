@@ -19,13 +19,16 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import data_making_2 as dm
-# from utils import redirect_stdout
 from utils import *
 from config import Config
 from dataset import MyDataset
 from models.transformer import Transformer
 from scheduler import WarmupCosineSchedule
-import requests
+
+# Ray Tune
+from ray import tune
+from ray.tune.schedulers import ASHAScheduler
+from ray.tune.search.optuna import OptunaSearch
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +215,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         end.record(stream)
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
-        # valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt, org_loss, enc_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt, org_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
         # lr_scheduler.step() # else
@@ -224,13 +226,13 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
+        # Ray recording
+        tune.report({"loss":valid_loss})
+
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || DEC Loss: {dec_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || ORG Loss: {org_loss:.4f} || DEC Loss: {dec_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
-        # [DEV]
-        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || DEC Loss: {dec_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
         if epoch > 100:
             break
-        # if update_cnt > 10:
-        if update_cnt > 100: # dev
+        if update_cnt > 100: 
             break
     writer.close()
 
@@ -279,10 +281,6 @@ def eval(model, ds_iter):
             mask = (batch['item_rating'] != 0)
             
             loss = RMSE(outputs, batch['item_rating'], mask)
-            # squared_diff = (outputs - batch['item_rating'])**2 * mask
-            # loss = torch.sum(squared_diff) / torch.sum(mask)
-            # loss = torch.sqrt(loss) # dev
-
             # loss += enc_loss
             loss += dec_bce
             eval_losses.update(loss)
@@ -484,18 +482,16 @@ def main():
             "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4)
     }
 
-    ### training preparation ###
+    ############################################################ training preparation ############################################################
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr = training_config["learning_rate"],
-        betas = (0.9, 0.999), eps = 1e-6, weight_decay = training_config["weight_decay"]
+        betas=(0.9, 0.999), eps=1e-6, weight_decay=training_config["weight_decay"]
     )
 
     # total_steps는 cycle당 있는 step 수. 없다면 epoch와 steps_per_epoch를 전댈해야함.
         # steps_per_epoch는 한 epoch에서의 전체 step 수: (total_number_of_train_samples / batch_size)
-    total_epochs = training_config["num_epochs"]
-    total_train_samples = len(train_ds)
     training_config["num_train_steps"] = len(ds_iter['train'])
 
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -507,6 +503,33 @@ def main():
         min_lr = 1e-6,
         verbose = True
     )
+
+    ############################################################ parameter tuning ############################################################
+
+    # search_space = {
+    #     "d_model" : tune.grid_search([64, 128, 256]),
+    #     "d_ffn" : tune.grid_search([256, 512, 1024]),
+    #     "dropout" : tune.uniform(0.1,0.3),
+    #     "weight_decay": tune.uniform(0.01, 0.1)
+    # }
+
+    # ray_scheduler = ASHAScheduler(
+    #     metric="loss",
+    #     mode="min",
+    #     max_t=training_config["num_epochs"],
+    #     grace_period=10,
+    #     reduction_factor=3
+    # )
+    
+    # tuner = tune.Tuner(
+    #     train,
+    #     param_space=search_space,
+    #     num_samples=5,
+    #     scheduler=ray_scheduler
+    # )
+
+    # results = tuner.fit()
+    # best_result = results.get_best_result("loss", "min")
 
     # [DEV]
 
