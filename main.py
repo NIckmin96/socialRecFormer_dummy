@@ -27,11 +27,8 @@ from scheduler import WarmupCosineSchedule
 
 # Ray Tune
 from ray import tune
-from ray import train
-from ray.train import Checkpoint, get_checkpoint
 from ray.tune.schedulers import ASHAScheduler
-import ray.cloudpickle as pickle
-from functools import partial
+from ray.tune.search.optuna import OptunaSearch
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +215,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         end.record(stream)
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
-        # valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt, org_loss, enc_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt, org_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
         # lr_scheduler.step() # else
@@ -230,13 +226,13 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
+        # Ray recording
+        tune.report({"loss":valid_loss})
+
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || DEC Loss: {dec_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || ORG Loss: {org_loss:.4f} || DEC Loss: {dec_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
-        # [DEV]
-        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || DEC Loss: {dec_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
         if epoch > 100:
             break
-        # if update_cnt > 10:
-        if update_cnt > 100: # dev
+        if update_cnt > 100: 
             break
     writer.close()
 
@@ -285,10 +281,6 @@ def eval(model, ds_iter):
             mask = (batch['item_rating'] != 0)
             
             loss = RMSE(outputs, batch['item_rating'], mask)
-            # squared_diff = (outputs - batch['item_rating'])**2 * mask
-            # loss = torch.sum(squared_diff) / torch.sum(mask)
-            # loss = torch.sqrt(loss) # dev
-
             # loss += enc_loss
             loss += dec_bce
             eval_losses.update(loss)
@@ -512,26 +504,32 @@ def main():
         verbose = True
     )
 
-    ray_config = {
-        "d_model" : tune.grid_search([64, 128, 256]),
-        "d_ffn" : tune.grid_search([256, 512, 1024]),
-        "num_heads": tune.grid_search([4,8]),
-        "topk" : tune.grid_search([1,2,3]),
-        "dropout" : tune.uniform(0.1,0.3),
-        "weight_decay": tune.uniform(0.01, 0.1)
-    }
+    ############################################################ parameter tuning ############################################################
 
-    ray_scheduler = ASHAScheduler(
-        metric="loss",
-        mode="min",
-        max_t=training_config["num_epochs"]
-    )
+    # search_space = {
+    #     "d_model" : tune.grid_search([64, 128, 256]),
+    #     "d_ffn" : tune.grid_search([256, 512, 1024]),
+    #     "dropout" : tune.uniform(0.1,0.3),
+    #     "weight_decay": tune.uniform(0.01, 0.1)
+    # }
+
+    # ray_scheduler = ASHAScheduler(
+    #     metric="loss",
+    #     mode="min",
+    #     max_t=training_config["num_epochs"],
+    #     grace_period=10,
+    #     reduction_factor=3
+    # )
     
-    result = tune.run(
-        train,
-        config=ray_config,
-        checkpoint_at_end=True
-    )
+    # tuner = tune.Tuner(
+    #     train,
+    #     param_space=search_space,
+    #     num_samples=5,
+    #     scheduler=ray_scheduler
+    # )
+
+    # results = tuner.fit()
+    # best_result = results.get_best_result("loss", "min")
 
     # [DEV]
 

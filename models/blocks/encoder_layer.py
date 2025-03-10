@@ -3,8 +3,6 @@ import torch.nn as nn
 from models.layers.multi_head_attention import MultiHeadAttention
 from models.layers.feed_forward_network import FeedForwardNetwork, SparseMoE
 
-from utils import he_init
-
 class EncoderLayer(nn.Module):
     """
     Input:

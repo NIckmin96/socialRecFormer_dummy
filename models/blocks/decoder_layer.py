@@ -65,26 +65,25 @@ class DecoderLayer(nn.Module):
         x = self.dropout_self(x)
         x = x + residual
         
-        # 1-2. FFN
-        residual = x
-        x = self.norm_self_fc(x)
-        x = self.moe(x)
-        x = self.dropout_self_fc(x)
-        x = x + residual
+        # # 1-2. FFN
+        # residual = x
+        # x = self.norm_self_fc(x)
+        # x = self.moe(x)
+        # x = self.dropout_self_fc(x)
+        # x = x + residual
         
         # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
         residual = x
         enc_output = enc_output + rating_x # rating 정보 추가
         x = self.norm_cross1(x)
-        
-        if not self.last_layer_flag:
-            x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
-        else:
-            # 7. last layer returns predicted ratings.
-            x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
+        x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
         x = self.dropout_cross1(x)
         x = x + residual
-    
+        
+        if self.last_layer_flag:
+            # 7. last layer returns predicted ratings.
+            x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
+            
         # 2-2. FFN
         residual = x
         x = self.norm_cross1_fc(x)
