@@ -30,15 +30,17 @@ import torch
 from scipy import sparse
 
 # 최초 한번만 실행
-def mat_to_csv(data_path:str):
+def mat_to_csv(data_path:str, regenerate=False):
     # rating_df : user-item interaction data
     # trust_df : user간의 Social interaction을 나타내는 데이터
     rating_path = os.path.join(data_path,'rating.csv')
     trust_path = os.path.join(data_path,'trustnetwork.csv')
-    if os.path.isfile(rating_path) & os.path.isfile(trust_path):
+    if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (not regenerate):
         rating_df = pd.read_csv(rating_path)
         trust_df = pd.read_csv(trust_path)
         return rating_df, trust_df
+    
+    print("Creating rating_df, trust_df...")
     dataset_name = data_path.split('/')[-1]
 
     # rating_df
@@ -65,6 +67,10 @@ def mat_to_csv(data_path:str):
     # 2. Re-index : user_id를 1부터 순차적으로 rearrange
     rating_df, trust_df = reset_and_filter_data(rating_df, trust_df)
 
+    # rating_df 중복 제거
+    rating_df = rating_df.drop_duplicates(keep='first')
+    rating_df = rating_df.reset_index(drop=True)
+
     # 전체 user-item rating 정보를 담은 rating matrix 생성
     rating_matrix = sparse.lil_matrix((max(rating_df['user_id'].unique())+1, max(rating_df['product_id'].unique())+1), dtype=np.uint16)
 
@@ -78,7 +84,7 @@ def mat_to_csv(data_path:str):
     rating_df.to_csv(data_path + '/rating.csv', index=False)
     trust_df.to_csv(data_path + '/trustnetwork.csv', index=False)
 
-    print(".mat file converting finished...")
+    print(".mat file converting finished...\n")
     return rating_df, trust_df
 
 def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:
@@ -156,7 +162,7 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
 
     print(f"# of train unique users : {rating_train_set.user_id.nunique()} / # of test unique users : {rating_test_set.user_id.nunique()}")
-    print(f"data split finished, seed: {seed}")
+    print(f"data split finished, seed: {seed}\n")
     
     return rating_train_set, rating_test_set
 
@@ -167,7 +173,7 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
     split_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
     rating_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
     if (not os.path.isfile(split_file)) or regenerate:
-        print(f"Creating Social {split} split sets...")
+        print(f"Creating Social {split} split sets...\n")
         trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
         social_split = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
@@ -175,9 +181,10 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
         unique_users = list(set(social_split['user_id_1'].unique()).union(set(social_split['user_id_2'].unique())))
         rating_split = rating_split[rating_split.user_id.isin(unique_users)]
         # save
-        social_split.to_csv(split_file)
+        social_split.to_csv(split_file, index=False)
         rating_split.to_csv(rating_file, index=False)
     else:
+        print("Loading Social split sets...\n")
         social_split = pd.read_csv(split_file)
         rating_split = pd.read_csv(rating_file)
     
@@ -392,8 +399,10 @@ def remove_duplicated_social_random_walk_sequence(data_path:str, random_walk_tra
     random_walk_test = random_walk_test.drop_duplicates('random_walk_seq')
     random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
 
-    random_walk_train.to_csv(train_path)
-    random_walk_test.to_csv(test_path)
+    random_walk_train.reset_index(drop=True); random_walk_test.reset_index(drop=True)
+
+    random_walk_train.to_csv(train_path, index=False)
+    random_walk_test.to_csv(test_path, index=False)
 
     print(f"rw_train len : {len(random_walk_train)} rw_test len : {len(random_walk_test)}")
 
@@ -509,7 +518,7 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
                 diff = item_per_user - len(selected_items)
                 selected_items.extend(np.random.choice(items, diff))
             else:
-                selected_items = []
+                selected_items = [0]*item_per_user
                 
             test_user_product_dict.setdefault(user,[]).extend(selected_items)
             
@@ -545,13 +554,18 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df = total_df.explode(['item_sequences','item_degree']).reset_index(drop=True)
+
         # spd matrix
-        print("Processing Spd Matrix ...")
-        total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
+        # print("Processing Spd Matrix ...")
+        # total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
+        
         # rating matrix(user-item)
         print("Processing Rating Matrix ...")
         total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
-        total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback',
+        # total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback','anchor_ratings',
+        #                      'item_sequences','item_degree','spd_matrix','item_rating']]
+        # dev -> spd_loss 제거
+        total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback','anchor_ratings',
                              'item_sequences','item_degree','spd_matrix','item_rating']]
 
         with open(total_path, "wb") as file:

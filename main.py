@@ -54,7 +54,6 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt):
-    criterion = nn.MSELoss()
     eval_losses = AverageMeter()
     org_losses = AverageMeter()
     dec_losses = AverageMeter()
@@ -80,16 +79,16 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             batch['anchor_items'] = batch['anchor_items'].to(device)
             batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
             batch['imp_fdback'] = batch['imp_fdback'].to(device)
+            batch['exp_fdback'] = batch['exp_fdback'].to(device)
 
-            rank_logits, rating_pred, enc_loss, dec_bce, dec_rmse = model(batch, is_train=False)
+            rank_logits, rating_pred, enc_loss, dec_rmse = model(batch, is_train=False)
             # rmse loss 계산(Rating)
             mask = (batch['item_rating'] != 0)
             org_loss = RMSE(rating_pred, batch['item_rating'], mask)
-            loss = org_loss + dec_bce
+            loss = org_loss
             
             eval_losses.update(loss)
             org_losses.update(org_loss)
-            dec_losses.update(dec_bce)
             
             pred.append(rating_pred)
             trg.append(batch['item_rating'])
@@ -98,12 +97,27 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             epoch_iterator.set_description(
                         "Validating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), loss))
         
+        # Rating Valid Result
         pred = torch.cat(pred)
         trg = torch.cat(trg)
         msk = torch.cat(msk)
         
         total_rmse = RMSE(pred, trg, msk)
         total_mae = MAE(pred, trg, msk)
+
+        # Rank Valid Result
+        rank_eval_5 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=5)
+        precision_5 = rank_eval_5.precision()
+        recall_5 = rank_eval_5.recall()
+        ndcg_5 = rank_eval_5.NDCG()
+        print(f"Precision : {precision_5} / Recall : {recall_5} / NDCG : {ndcg_5}")
+        rank_eval_10 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=10)
+        precision_10 = rank_eval_10.precision()
+        recall_10 = rank_eval_10.recall()
+        ndcg_10 = rank_eval_10.NDCG()
+        print(f"Precision : {precision_10} / Recall : {recall_10} / NDCG : {ndcg_10}")
+
+
 
         # baseline의 metric보다 낮은 경우
         if (total_rmse.item()<baseline_rmse) & (total_mae.item()<baseline_mae):
@@ -185,17 +199,19 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             batch['anchor_items'] = batch['anchor_items'].to(device)
             batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
             batch['imp_fdback'] = batch['imp_fdback'].to(device)
+            batch['exp_fdback'] = batch['exp_fdback'].to(device)
 
             # forward pass
-            rank_logits, rating_pred, enc_loss, dec_bce, dec_rmse = model(batch)
+            rank_logits, rating_pred, enc_loss, dec_rmse = model(batch)
 
             # compute loss
             mask = (batch['item_rating'] != 0)
             org_loss = RMSE(rating_pred, batch['item_rating'], mask)
-            
-            # loss = org_loss + enc_loss + dec_bce + dec_rmse
-            loss = org_loss + dec_bce
-            # loss = org_loss
+            y_rank_value = F.softmax(batch['exp_fdback'].float(), dim=-1)
+            rank_loss = RMSE(rank_logits, y_rank_value)
+            loss = org_loss + rank_loss
+            # loss = org_loss + dec_bce # rating loss(rmse) + rank loss(bce)
+            # loss = dec_bce
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -204,7 +220,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
             losses.update(loss)
             org_losses.update(org_loss)
-            dec_losses.update(dec_bce)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
@@ -223,10 +238,10 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
-        # Ray recording
-        tune.report({"loss":valid_loss})
+        # # Ray recording
+        # tune.report({"loss":valid_loss})
 
-        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || DEC Loss: {dec_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || ORG Loss: {org_loss:.4f} || DEC Loss: {dec_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
+        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || ORG Loss: {org_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
         if epoch > 100:
             break
         if update_cnt > 100: 
@@ -273,13 +288,12 @@ def eval(model, ds_iter):
             batch['anchor_items'] = batch['anchor_items'].to(device)
             batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
             batch['imp_fdback'] = batch['imp_fdback'].to(device)
+            batch['exp_fdback'] = batch['exp_fdback'].to(device)
             
-            rank_logits, rating_pred, enc_loss, dec_bce, dec_rmse = model(batch, is_train=False)
+            rank_logits, rating_pred, enc_loss, dec_rmse = model(batch, is_train=False)
             mask = (batch['item_rating'] != 0)
             
             loss = RMSE(rating_pred, batch['item_rating'], mask)
-            # loss += enc_loss
-            loss += dec_bce
             eval_losses.update(loss)
             
             pred.append(rating_pred)
@@ -318,8 +332,8 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=6, help="num dec layers")
+    parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
+    parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
     parser.add_argument('--rating_thres', type=int, default=3, help="explicit rating threshold for creating implicit feedback")
@@ -331,7 +345,7 @@ def get_args():
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--train_augs', type=int, default=1, help="how many times augment train data per anchor user")    
-    parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
+    parser.add_argument('--test_augs', type=bool, default=True, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
     parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
@@ -497,7 +511,7 @@ def main():
         factor = 0.85,
         patience = 3,
         threshold = 1e-2,
-        min_lr = 1e-6,
+        # min_lr = 1e-6,
         verbose = True
     )
 

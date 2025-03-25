@@ -78,7 +78,44 @@ epinions={
          },
      }
 
+yelp={
+         "model":{
+            "num_user": 906179,
+            "max_user_degree": 2026,
+            "num_item": 261679,
+            "max_item_degree": 1440,
+            "max_spd_value": 15,
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
+            "d_ffn": 256,            # FFN dim
+            "num_heads": 4,
+            "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "num_layers_enc": 4,
+            "num_layers_dec": 4,
+            "n_experts": 8,
+            "topk": 1
+         },
+         "training":{
+            "batch_size":128,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)
+            "optimizer":"adamw",
+            "learning_rate":0.0001,
+            "warmup":80, 
+            "lr_decay":"cos",
+            "weight_decay":1e-1,
+            "eval_frequency":400, 
+            "num_epochs":100,
+            "num_eval_steps":849,   # total_valid_sample / total_epoch
+            "patience":10, 
+            "alpha":1,
+            "beta":3,
+            "gamma":3,
+            "baseline_rmse":0.8383,
+            "baseline_mae":1.0972
+         },
+     }
+
+
 Config = {
     "ciao":ciao,
     "epinions":epinions,
+    "yelp":yelp
 }

@@ -89,22 +89,21 @@ class Decoder(nn.Module):
         ranking_bias = self.ranking_bias(batched_data['imp_fdback'])
         rating_bias = self.rating_bias(batched_data['item_rating'])
             
-        bce_losses = []; rmse_losses = []
+        rmse_losses = []
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
-            x_item, bce_loss, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
-            bce_losses.append(bce_loss)
+            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
             rmse_losses.append(rmse_loss)
         
         # Pass to prediction layer
-        output, bce_loss, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
-        bce_losses.append(bce_loss)
+        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
         rmse_losses.append(rmse_loss)
         
         # [bs, i, d] => [bs, i]
         output = torch.mean(output, dim=-1)
-        rank_logits = F.sigmoid(output)
+        # rank_logits = F.sigmoid(output)
+        rank_logits = F.softmax(output, dim=-1)
 
         del self_attn_mask, cross_attn_mask_1, cross_attn_mask_2
 
-        return rank_logits, rating_pred, sum(bce_losses)/len(bce_losses), sum(rmse_losses)/len(rmse_losses)
+        return rank_logits, rating_pred, sum(rmse_losses)/len(rmse_losses)

@@ -63,6 +63,7 @@ class Encoder(nn.Module):
         # Encoder layer forward pass (MHA, FFN)
         for layer in self.enc_layers:
             x, spd_loss = layer(x, src_mask, attn_bias)
+            # x, spd_loss = layer(x, src_mask, None)
             losses.append(spd_loss)
 
         del src_mask, attn_bias

@@ -56,7 +56,7 @@ class DecoderLayer(nn.Module):
 
     def forward(self, x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias):
         # tmp
-        bce_loss, rmse_loss = 0,0
+        rmse_loss = 0
         rating_pred = None
         
         # 1-1. Self-Attention
@@ -75,7 +75,8 @@ class DecoderLayer(nn.Module):
         
         # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
         residual = x
-        enc_output = enc_output + rating_x # rating 정보 추가
+        enc_output = enc_output # rating 정보 추가 x
+        # enc_output = enc_output + rating_x # rating 정보 추가
         x = self.norm_cross1(x)
         x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
         x = self.dropout_cross1(x)
@@ -110,4 +111,4 @@ class DecoderLayer(nn.Module):
         x = self.dropout_cross2_fc(x)
         x = x + residual
         
-        return x, bce_loss, rmse_loss, rating_pred
+        return x, rmse_loss, rating_pred

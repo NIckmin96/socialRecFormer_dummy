@@ -101,18 +101,76 @@ def RMSE(pred, y, mask=None):
 
     return torch.sqrt(MSE(pred, y, mask))
 
-def Precision(recommended, liked):
-    inter = set(recommended).intersection(set(liked))
-    precision = float(len(inter)/len(recommended))
-    return precision
+class RankMetric:
+    def __init__(self, items, implicit, explicit, logits, k):
+        self.k=k
+        self.bs = len(items)
+        self.device = items.device
+        # logit을 기준으로 top-k indicies 추출
+        logit_indices = logits.argsort(descending=True).to('cpu').numpy()[:,:k].copy()
+        logit_indices = torch.tensor(logit_indices, device=self.device)
+        # ideal indices
+        ideal_indices = explicit.argsort(descending=True).to('cpu').numpy()[:,:k].copy()
+        ideal_indices = torch.tensor(ideal_indices, device=self.device)
+        # top-k recommended items
+        self.recommended_k = torch.gather(input=items, dim=1, index=logit_indices)
+        # top-k recommended items' ratings
+        self.recommended_k_rating = torch.gather(input=explicit, dim=1, index=logit_indices)
+        # ideal top-k items
+        self.ideal_k = torch.gather(input=items,dim=1,index=ideal_indices)
+        # top-k ideal items' ratings
+        self.ideal_k_rating = torch.sort(explicit, descending=True, dim=-1)[0][:,:self.k]
+        # implicit feedback이 1인 unique item list
+        self.liked = (items*(implicit==1)).unique(dim=1)
+        # intersection
+        self.inter = [set(self.recommended_k[i].tolist()).intersection(set(self.liked[i].tolist())) for i in range(self.bs)]
+        # print(self.recommended_k[:10])
+        # print(self.recommended_k_rating[:10])
+        # print(self.ideal_k[:10])
+        # print(self.ideal_k_rating[:10])
 
-def Recall(recommended, liked):
-    inter = set(recommended).intersection(set(liked))
-    recall = float(len(inter)/len(liked))
-    return recall
+    def precision(self):
+        total_precision = 0.0
+        for i in range(self.bs):
+            total_precision+=(len(self.inter[i])/len(self.recommended_k[i]))
+        total_precision/=(i+1)
+        return total_precision
+    
+    def recall(self):
+        total_recall = 0.0
+        for i in range(self.bs):
+            total_recall+=(len(self.inter[i])/len(self.liked[i]))
+        total_recall/=(i+1)
+        return total_recall
+    
+    # relevance를 explicit rating으로 설정(graded relevance)
+    def NDCG(self):
+        # DCG
+        DCG = 0.0
+        for i in range(self.bs):
+            for j,item in enumerate(self.recommended_k[i]):
+                item = item.item()
+                if item in self.inter[i]:
+                    rel = self.recommended_k_rating[i][j].item()
+                    rel = rel/np.log2(j+2)
+                else:
+                    rel = 0
+                DCG+=rel    
+            # DCG/=(j+1)
+        DCG/=(i+1)
+        # IDCG
+        IDCG = 0.0
+        for i in range(self.bs):
+            for j,rel in enumerate(self.ideal_k_rating[i]):
+                rel = rel.item()
+                rel = rel/np.log2(j+2)
+                IDCG+=rel
+            # IDCG/=(j+1)
+        IDCG/=(i+1)
+        
+        return DCG/IDCG
 
-def NDCG(recommended, liked):
-    pass
+
 
 ##############################################################################
 # REDIRECT LOGGER #
