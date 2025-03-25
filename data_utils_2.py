@@ -556,17 +556,17 @@ def generate_input_sequence_data(data_path, user_df:dict, item_df:dict, seed:int
         total_df = total_df.explode(['item_sequences','item_degree']).reset_index(drop=True)
 
         # spd matrix
-        # print("Processing Spd Matrix ...")
-        # total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
+        print("Processing Spd Matrix ...")
+        total_df['spd_matrix'] = total_df['user_sequences'].progress_map(lambda x:spd_table[torch.LongTensor(x)-1].T[torch.LongTensor(x)-1])
         
         # rating matrix(user-item)
         print("Processing Rating Matrix ...")
         total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
-        # total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback','anchor_ratings',
-        #                      'item_sequences','item_degree','spd_matrix','item_rating']]
-        # dev -> spd_loss 제거
         total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback','anchor_ratings',
                              'item_sequences','item_degree','spd_matrix','item_rating']]
+        # dev -> spd_loss 제거
+        # total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback','anchor_ratings',
+        #                      'item_sequences','item_degree','spd_matrix','item_rating']]
 
         with open(total_path, "wb") as file:
             pickle.dump(total_df, file)
