@@ -53,26 +53,28 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt):
+def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_mae, best_ndcg, update_cnt):
     eval_losses = AverageMeter()
     org_losses = AverageMeter()
     dec_losses = AverageMeter()
     model.eval()
     with torch.no_grad():
         # FIXME: valid를 기준으로 저장 X, test를 기준으로 바로 저장. 
-        epoch_iterator = tqdm(ds_iter['test'],
+        epoch_iterator = tqdm(ds_iter['valid'],
                               desc="Validating (X / X Steps) (loss=X.X)",
                               bar_format="{l_bar}{r_bar}",
                               dynamic_ncols=True,
                               leave=False)
         pred, trg, msk = [], [], []
+        precision_5, recall_5, ndcg_5 = .0, .0, .0
+        precision_10, recall_10, ndcg_10 = .0, .0, .0
         for step, batch in enumerate(epoch_iterator):
             batch['user_seq'] = batch['user_seq'].to(device)
             batch['user_degree'] = batch['user_degree'].to(device)
             batch['item_list'] = batch['item_list'].to(device)
             batch['item_degree'] = batch['item_degree'].to(device)
             batch['item_rating'] = batch['item_rating'].to(device)
-            batch['spd_matrix'] = batch['spd_matrix'].to(device)
+            # batch['spd_matrix'] = batch['spd_matrix'].to(device)
             ##################### [DEV] #####################
             batch['anchor_user'] = batch['anchor_user'].to(device)
             batch['anchor_degree'] = batch['anchor_degree'].to(device)
@@ -94,6 +96,12 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
             trg.append(batch['item_rating'])
             msk.append(mask)
 
+            # Rank Valid Result
+            rank_eval_10 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=10)
+            precision_10 += rank_eval_10.precision()
+            recall_10 += rank_eval_10.recall()
+            ndcg_10 += rank_eval_10.NDCG()
+
             epoch_iterator.set_description(
                         "Validating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), loss))
         
@@ -105,50 +113,24 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, be
         total_rmse = RMSE(pred, trg, msk)
         total_mae = MAE(pred, trg, msk)
 
-        # Rank Valid Result
-        rank_eval_5 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=5)
-        precision_5 = rank_eval_5.precision()
-        recall_5 = rank_eval_5.recall()
-        ndcg_5 = rank_eval_5.NDCG()
-        print(f"Precision : {precision_5} / Recall : {recall_5} / NDCG : {ndcg_5}")
-        rank_eval_10 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=10)
-        precision_10 = rank_eval_10.precision()
-        recall_10 = rank_eval_10.recall()
-        ndcg_10 = rank_eval_10.NDCG()
-        print(f"Precision : {precision_10} / Recall : {recall_10} / NDCG : {ndcg_10}")
-
-
-
-        # baseline의 metric보다 낮은 경우
-        if (total_rmse.item()<baseline_rmse) & (total_mae.item()<baseline_mae):
-            # best보다 낮은 경우
-            if (total_rmse+total_mae < best_dev_rmse+best_dev_mae): 
-                best_dev_rmse = total_rmse
-                best_dev_mae = total_mae
-                torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-                print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
-                update_cnt = 0
-            # best보다 높지만, best가 baseline보다 높은 경우 update
-            elif (best_dev_rmse.item()>baseline_rmse) | (best_dev_mae.item()>baseline_mae): 
-                best_dev_rmse = total_rmse
-                best_dev_mae = total_mae
-                torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-                print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
-                update_cnt = 0
-            else:
-                update_cnt += 1
-
-        # baseline보다 높지만, best보다 낮은 경우
-        elif total_rmse+total_mae < best_dev_rmse+best_dev_mae:
-            best_dev_rmse = total_rmse
-            best_dev_mae = total_mae
+        precision_10 /= (step+1)
+        recall_10 /= (step+1)
+        ndcg_10 /= (step+1)
+        
+        print(f"Precision : {precision_10:.4f} / Recall : {recall_10:.4f} / NDCG : {ndcg_10:.4f}")
+        
+        if ((1/total_rmse)*0.4+(ndcg_10)*0.6 > (1/best_rmse)*0.4+(best_ndcg)*0.6): 
+            best_ndcg = ndcg_10
+            best_rmse = total_rmse
+            best_mae = total_mae
             torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-            print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
+            print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}, test NDCG@10 = {ndcg_10.item():.6f}')
             update_cnt = 0
+        
         else:
             update_cnt += 1
 
-    return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt, org_losses.avg, dec_losses.avg
+    return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_rmse, total_mae, update_cnt, org_losses.avg, dec_losses.avg
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
@@ -158,8 +140,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     logger.info("  Total steps = %d", training_config["num_train_steps"])
 
     checkpoint_path = training_config['checkpoint_path']
-    best_dev_rmse = 9999.0
-    best_dev_mae = 9999.0
+    best_rmse = 9999.0
+    best_mae = 9999.0
+    best_ndcg = 0
     baseline_rmse = training_config['baseline_rmse']
     baseline_mae = training_config['baseline_mae']
 
@@ -178,7 +161,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     for epoch in range(total_epochs):
         losses = AverageMeter()
         org_losses = AverageMeter()
-        dec_losses = AverageMeter()
         epoch_iterator = tqdm(ds_iter['train'],
                             desc="Training (X / X Steps) (loss=X.X)",
                             bar_format="{l_bar}{r_bar}",
@@ -192,7 +174,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             batch['item_list'] = batch['item_list'].to(device)
             batch['item_degree'] = batch['item_degree'].to(device)
             batch['item_rating'] = batch['item_rating'].to(device)
-            batch['spd_matrix'] = batch['spd_matrix'].to(device)
+            # batch['spd_matrix'] = batch['spd_matrix'].to(device)
             ##################### [DEV] #####################
             batch['anchor_user'] = batch['anchor_user'].to(device)
             batch['anchor_degree'] = batch['anchor_degree'].to(device)
@@ -210,8 +192,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             y_rank_value = F.softmax(batch['exp_fdback'].float(), dim=-1)
             rank_loss = RMSE(rank_logits, y_rank_value)
             loss = org_loss + rank_loss
-            # loss = org_loss + dec_bce # rating loss(rmse) + rank loss(bce)
-            # loss = dec_bce
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -227,11 +207,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         end.record(stream)
         torch.cuda.synchronize()
         total_time += (start.elapsed_time(end))
-        valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt, org_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
+        valid_loss, best_rmse, best_mae, best_ndcg, valid_rmse, valid_mae, update_cnt, org_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
-        # lr_scheduler.step() # else
-        # print(lr_scheduler.get_last_lr()) # else
-        start.record(stream)
 
         # Tensorboard recording
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
@@ -241,7 +218,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         # # Ray recording
         # tune.report({"loss":valid_loss})
 
-        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || ORG Loss: {org_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || ORG Loss: {org_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
+        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f}\n")
         if epoch > 100:
             break
         if update_cnt > 100: 
@@ -273,6 +250,13 @@ def eval(model, ds_iter):
                         leave=False)
 
         pred, trg, msk = [], [], []
+        total_precision_5, total_precision_10 = 0.0, 0.0
+        total_recall_5, total_recall_10 = 0.0, 0.0
+        total_ndcg_5, total_ndcg_10 = 0.0, 0.0
+        
+        # check용
+        df = pd.DataFrame(columns=['user_id','product_id','rating','logits'])
+        
         for step, batch in enumerate(epoch_iterator):
             
             # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
@@ -281,7 +265,7 @@ def eval(model, ds_iter):
             batch['item_list'] = batch['item_list'].to(device)
             batch['item_degree'] = batch['item_degree'].to(device)
             batch['item_rating'] = batch['item_rating'].to(device)
-            batch['spd_matrix'] = batch['spd_matrix'].to(device)
+            # batch['spd_matrix'] = batch['spd_matrix'].to(device)
             ##################### [DEV] #####################
             batch['anchor_user'] = batch['anchor_user'].to(device)
             batch['anchor_degree'] = batch['anchor_degree'].to(device)
@@ -299,6 +283,29 @@ def eval(model, ds_iter):
             pred.append(rating_pred)
             trg.append(batch['item_rating'])
             msk.append(mask)
+            
+            # check
+            df = pd.concat([df, pd.DataFrame({"user_id":batch['anchor_user'].to('cpu').tolist(), "product_id":batch['anchor_items'].to('cpu').tolist(), "rating":batch['exp_fdback'].to('cpu').tolist(), "logits":rank_logits.tolist()})])
+            
+            # Rank Valid Result
+            rank_eval_5 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=5)
+            precision_5 = rank_eval_5.precision()
+            recall_5 = rank_eval_5.recall()
+            ndcg_5 = rank_eval_5.NDCG()
+            
+            total_precision_5 += precision_5
+            total_recall_5 += recall_5
+            total_ndcg_5 += ndcg_5
+            
+            
+            rank_eval_10 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=10)
+            precision_10 = rank_eval_10.precision()
+            recall_10 = rank_eval_10.recall()
+            ndcg_10 = rank_eval_10.NDCG()
+            
+            total_precision_10 += precision_10
+            total_recall_10 += recall_10
+            total_ndcg_10 += ndcg_10
 
             epoch_iterator.set_description(
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
@@ -308,7 +315,15 @@ def eval(model, ds_iter):
         print(pred[msk])
         print(trg[msk])
         total_rmse = RMSE(pred, trg, msk)
-        total_mae = MAE(pred, trg, msk)        
+        total_mae = MAE(pred, trg, msk)
+        
+        total_ndcg_5 /= (step+1)
+        total_recall_5 /= (step+1)
+        total_precision_5 /= (step+1)
+        total_ndcg_10 /= (step+1)
+        total_recall_10 /= (step+1)
+        total_precision_10 /= (step+1)
+        
         
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
 
@@ -319,9 +334,14 @@ def eval(model, ds_iter):
     print("Loss: %2.5f" % eval_losses.avg)
     print("RMSE: %2.5f" % total_rmse)
     print("MAE: %2.5f" % total_mae)
+    print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
+    print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
     print(f"total eval time: {(start.elapsed_time(end))}")
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
+    
+    # check
+    df.to_csv('after_test.csv', index=False)
 
     
 def get_args():
@@ -332,12 +352,12 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
+    parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
+    parser.add_argument('--num_layers_dec', type=int, default=5, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
-    parser.add_argument('--rating_thres', type=int, default=3, help="explicit rating threshold for creating implicit feedback")
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
+    parser.add_argument('--lr', type=float, default=1e-2)
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
@@ -360,12 +380,48 @@ def main():
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                         datefmt='%m/%d/%Y %H:%M:%S',
                         level=logging.INFO)
+    ######################################################### data preparation #########################################################
+
+    ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
+        ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
+
+
+    # regenerate 여부 확인
+    if args.regenerate:
+        print("Re-Creating Datatset...")
+    else:
+        print("Loading Datatset...")
+    data_making = dm.DatasetMaking(args)
     
+    print("\n")
+    total_train = data_making.total_train
+    total_valid = data_making.total_valid
+    total_test = data_making.total_test
+
+    train_ds = MyDataset(total_train)
+    valid_ds = MyDataset(total_valid)
+    test_ds = MyDataset(total_test)
+
+
     ### get model config ###
     model_config = Config[args.dataset]["model"]
     training_config = Config[args.dataset]["training"]
+    # batch size update
+    training_config["batch_size"] = args.bs
+    ds_iter = {
+            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
+            "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4),
+            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4)
+    }
+
+    ######################################################### model initialization #########################################################
 
     training_config["learning_rate"] = args.lr
+    # model config - num users & num items & degrees
+    model_config["num_user"] = data_making.num_user
+    model_config["num_item"] = data_making.num_item
+    model_config["max_user_degree"] = data_making.max_user_degree
+    model_config["max_item_degree"] = data_making.max_item_degree
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
     model_config["num_layers_enc"] = args.num_layers_enc + int(math.log(args.train_augs,2))
     model_config["num_layers_dec"] = args.num_layers_dec + int(math.log(args.train_augs,2))
@@ -421,6 +477,24 @@ def main():
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
 
+    # 1. file path check(train_augs & test_augs)
+    train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
+    if args.test_augs:
+        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}\n \
+            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
+        valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_valid_{args.train_augs}times.pkl')
+        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
+    else:
+        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n \
+            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
+        valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_valid.pkl')
+        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
+                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test.pkl')
+
     # gpu device선택
     device_ids = list(range(torch.cuda.device_count()))
     pynvml.nvmlInit()
@@ -431,7 +505,8 @@ def main():
             device = torch.device(f'cuda:{i}')
             break
         else:
-            device = 'cpu'
+            device = torch.device('cpu')
+            
 
     pynvml.nvmlShutdown()
 
@@ -446,52 +521,11 @@ def main():
     print(f"GPU index: {device.index}")
     print("\n")
     
-    model = model.to(device)
-
-    ######################################################### data preparation #########################################################
-
-    ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
-        ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
-
-
-    # regenerate 여부 확인
-    if args.regenerate:
-        print("Re-Creating Datatset...")
-    else:
-        print("Loading Datatset...")
-    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_per_user, args.return_params, args.train_augs, args.test_augs, args.rating_thres, args.regenerate)    
-
-    # 1. file path check(train_augs & test_augs)
-    train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
-    # valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-    #                           f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
-    if args.test_augs:
-        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}\n \
-            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
-    else:
-        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n \
-            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test.pkl')
+    # debug
+    # device = torch.device("cpu")
+    # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
     
-    print("\n")
-    total_train = data_making.total_train
-    # total_valid = data_making.total_valid
-    total_test = data_making.total_test
-
-    train_ds = MyDataset(total_train)
-    # valid_ds = MyDataset(total_valid)
-    test_ds = MyDataset(total_test)
-
-    # batch size update
-    training_config["batch_size"] = args.bs
-    ds_iter = {
-            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
-            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4)
-    }
+    model = model.to(device)
 
     ############################################################ training preparation ############################################################
 
@@ -542,26 +576,6 @@ def main():
     # results = tuner.fit()
     # best_result = results.get_best_result("loss", "min")
 
-    # [DEV]
-
-    # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
-    #     optimizer = optimizer,
-    #     max_lr = training_config["learning_rate"],
-    #     epochs=training_config["num_epochs"],
-    #     steps_per_epoch=training_config["num_train_steps"],
-    #     pct_start = 0.15,
-    #     anneal_strategy = training_config["lr_decay"],
-    #     div_factor = 100,
-    #     final_div_factor = 100
-    # )
-    
-    # lr_scheduler = CosineAnnealingWarmUpRestarts(optimizer=optimizer,
-    #                                              T_0=10,
-    #                                              T_mult=1,
-    #                                              eta_max=1e-2,
-    #                                              T_up=2,
-    #                                              gamma=0.5)
-
     ### TensorBoard writer preparation ###
     writer = SummaryWriter(os.path.join(log_dir,f"{args.name}.tensorboard"))
     ### train ###
@@ -571,10 +585,6 @@ def main():
     # Since train logging is done by TensorBoard, log only test result.
     log_path = os.path.join(log_dir,'{}.{}.log'.format(args.mode, args.name))
     redirect_stdout(open(log_path, 'w'))
-
-    print(json.dumps(args.__dict__, indent = 4))
-
-    print(json.dumps([model_config, training_config], indent = 4))
 
     ### eval ###
     print(checkpoint_path)

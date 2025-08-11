@@ -4,10 +4,11 @@ checkpoints/
 dataset/
 !dataset/*.npy
 !dataset/*.mat
-*.pkl
-*.npy
 runs/
 tmp/
 drawio/
-test.ipynb
+*.ipynb
+*.sh
+*.pkl
+*.npy
 training_log.txt

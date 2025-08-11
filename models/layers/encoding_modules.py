@@ -52,8 +52,8 @@ class RatingEncoder(nn.Module):
         super(RatingEncoder, self).__init__()
         self.num_nodes = num_nodes
         self.len_item_seq = len_item_seq
-        self.user_bias = nn.Embedding(num_nodes+1, d_model) # 0 : cold start user
-        self.rating_fc = nn.Linear(len_item_seq, d_model)
+        self.user_bias = nn.Embedding(num_nodes+1, d_model//2) # 0 : cold start user
+        self.rating_fc = nn.Linear(len_item_seq, d_model//2)
 
     def forward(self, batched_data, is_train=True):
         user_id = batched_data["user_seq"] # bs x u
@@ -72,7 +72,7 @@ class RatingEncoder(nn.Module):
 
             
             rating_bias = self.rating_fc(item_rating.float())
-            rating_embedding = (user_bias + rating_bias)
+            rating_embedding = torch.cat([user_bias, rating_bias], dim=-1)
         else:
             rating_embedding = user_bias
 

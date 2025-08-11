@@ -22,7 +22,7 @@ class MyDataset(Dataset):
         self.item_sequences = torch.tensor(dataframe['item_sequences'].tolist(), dtype=torch.long)
         self.item_degree = torch.tensor(dataframe['item_degree'].tolist(), dtype=torch.long)
         self.rating_matrix = dataframe['item_rating']
-        self.spd_matrix = dataframe['spd_matrix']
+        # self.spd_matrix = dataframe['spd_matrix']
     
     def __len__(self):
         # 전체 {train/valid/test}.csv의 길이 (dataframe의 전체 row 갯수)
@@ -43,5 +43,5 @@ class MyDataset(Dataset):
             'item_list': self.item_sequences[index],
             'item_degree': self.item_degree[index],
             'item_rating': self.rating_matrix[index],
-            'spd_matrix': self.spd_matrix[index]
+            # 'spd_matrix': self.spd_matrix[index]
         }
