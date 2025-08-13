@@ -92,15 +92,11 @@ def mat_to_csv(data_path:str, regenerate=False):
 
     return rating_df, trust_df
 
-def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:
-    # Filter Dups / Nulls / Useless values
-    
-
+def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:   
     # filter data by users(existing in both columns in trust_df)
-    total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).union(set(rating_df.user_id.unique()))
+    total_users = rating_df.user_id.unique()
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
     trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
-
     
     # Generate user id mapping table
     mapping_table_user = {user_id:idx+1 for idx,user_id in enumerate(total_users)}
