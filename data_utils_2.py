@@ -220,34 +220,37 @@ def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, de
 
 
 def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFrame, user_degree:pd.DataFrame, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10, test_augs:bool=False, regenerate:bool=False):
-
-    social_split = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
+    # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
+    # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
+    # experiment : social node 전체 순회 vs rating split user node기준 순회
+    social_graph = nx.from_pandas_edgelist(social_graph, source='user_id_1', target='user_id_2')
+    # Data augmentation -> node 복제
     if split=='train':
-        anchor_nodes = np.repeat(social_split.nodes(), train_augs)
+        anchor_nodes = np.repeat(social_graph.nodes(), train_augs)
     elif split=='test':
         if test_augs:
             test_augs = min(train_augs, 3) # test set augmentation은 최대 3배까지
-            anchor_nodes = np.repeat(social_split.nodes(), test_augs)
+            anchor_nodes = np.repeat(social_graph.nodes(), test_augs)
         else:
-            anchor_nodes = social_split.nodes()
+            anchor_nodes = social_graph.nodes()
     else:
-        anchor_nodes = social_split.nodes()
+        anchor_nodes = social_graph.nodes()
     # save dir 지정
     if split=='train':
-        file_path = os.path.join(data_path, f"social_user_{len(social_split.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
+        file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
     elif split=='valid':
-        file_path = os.path.join(data_path, f"social_user_{len(social_split.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
+        file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
     else:
         if test_augs:
-            file_path = os.path.join(data_path, f"social_user_{len(social_split.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{test_augs}times.csv")
+            file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{test_augs}times.csv")
         else:
-            file_path = os.path.join(data_path, f"social_user_{len(social_split.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
+            file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
 
-    # dataframe return 시키는 부분
+    # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path)&(not regenerate):
         print(f"Loading {split} random walk sequence file...")
         df = pd.read_csv(file_path)
-    
+    # 새로 생성 or Regenerate
     else:
         user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
         # random walk sequence
@@ -258,14 +261,14 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
         for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
             while True:
                 seqs = [nodes]
-                wl = 0
+                wl = 1
                 threshold = 0
                 s2 = set()
-                while wl < walk_length-1:
+                while wl < walk_length:
                     # 처음 : random next node 추출 후, append
-                    if wl == 0:
-                        # next_node = find_next_node(social_split, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
-                        next_node = find_next_node(social_split, previous_node=None, current_node=nodes)
+                    if wl == 1:
+                        # next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
+                        next_node = find_next_node(social_graph, previous_node=None, current_node=nodes)
                     # 처음이 아닌 경우
                     else:
                         # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
@@ -273,8 +276,8 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
                             next_node = 0
                         # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
                         else:
-                            # next_node = find_next_node(social_split, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
-                            next_node = find_next_node(social_split, previous_node=seqs[-2], current_node=seqs[-1])
+                            # next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+                            next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1])
                             if next_node in seqs:
                                 threshold+=1
                                 if threshold > 10:
@@ -336,7 +339,7 @@ def find_next_node(input_G, previous_node, current_node): # 확률적으로, anc
     # 문제 : neighbor가 많을 경우에, 이전 노드로 돌아갈 확률이 다른 노드로 갈 확률보다 높아짐 -> 의도된 것?
     # return param을 고정하지않고, neighbor의 개수에 따라 유동적으로 변하는게 합리적임 -> n개의 neighbor가 있으면, x = (1/n)*n + return, 1 = (1/nx)*n + return/x
         
-    neighbors = list(input_G.neighbors(current_node))
+    neighbors = set(list(input_G.neighbors(current_node)))-{previous_node}
     n = len(neighbors)
 
     if previous_node is not None:
