@@ -113,14 +113,14 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
 def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False):
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
-    # valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
     # if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regenerate)):
     if os.path.isfile(train_path) & os.path.isfile(test_path) & (not regenerate):
         print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
-        # rating_valid_set = pd.read_csv(valid_path)
+        rating_valid_set = pd.read_csv(valid_path)
         rating_test_set = pd.read_csv(test_path)
         
     else:
@@ -152,7 +152,7 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
         print(f"Creating Social {split} split sets...\n")
         # trust_df = pd.read_csv(data_path + '/trustnetwork_org.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
-        social_split = trust_df[(trust_df['user_id_1'].isin(users)) | (trust_df['user_id_2'].isin(users))]
+        social_split = trust_df[(trust_df['user_id_1'].isin(users)) & (trust_df['user_id_2'].isin(users))]
 
         # save
         social_split.to_csv(social_file, index=False)
