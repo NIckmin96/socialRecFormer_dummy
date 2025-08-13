@@ -8,15 +8,15 @@ class DatasetMaking:
         data_path = os.getcwd() + '/dataset/' + args.dataset
         # create fundamental dataframe (Rating / Social)
         self.rating_df, self.trust_df = utils.mat_to_csv(data_path, args.regenerate)
-        del self.rating_df, self.trust_df
+        # del self.rating_df, self.trust_df
         
         # Shuffle and split Rating dataframe
         self.rating_train, self.rating_valid, self.rating_test = utils.shuffle_and_split_dataset(data_path, test=args.test_ratio, seed=args.seed, regenerate=args.regenerate)
 
         # Filter Social dataframe by Rating dataframe and Split
-        self.social_train, self.rating_train = utils.generate_social_dataset(data_path, 'train', self.rating_train, seed=args.seed, regenerate=args.regenerate)
-        self.social_valid, self.rating_valid = utils.generate_social_dataset(data_path, 'valid', self.rating_valid, seed=args.seed, regenerate=args.regenerate)
-        self.social_test, self.rating_test = utils.generate_social_dataset(data_path, 'test', self.rating_test, seed=args.seed, regenerate=args.regenerate)
+        self.social_train, self.rating_train = utils.generate_social_dataset(data_path, 'train', self.rating_train, self.trust_df,  seed=args.seed, regenerate=args.regenerate)
+        self.social_valid, self.rating_valid = utils.generate_social_dataset(data_path, 'valid', self.rating_valid, self.trust_df, seed=args.seed, regenerate=args.regenerate)
+        self.social_test, self.rating_test = utils.generate_social_dataset(data_path, 'test', self.rating_test, self.trust_df, seed=args.seed, regenerate=args.regenerate)
         self.num_user = max(self.rating_train.user_id.max(), self.rating_valid.user_id.max(), self.rating_test.user_id.max())
         self.num_item = max(self.rating_train.product_id.max(), self.rating_valid.product_id.max(), self.rating_test.product_id.max())
 

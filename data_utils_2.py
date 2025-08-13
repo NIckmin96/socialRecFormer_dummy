@@ -23,9 +23,9 @@ from scipy.io import loadmat
 from tqdm.auto import tqdm
 # from collections import defaultdict
 from sklearn.utils import shuffle
-# from sklearn.preprocessing import minmax_scale
 import torch
 from scipy import sparse
+from data_preprocess import prepare_org_data
 
 # 최초 한번만 실행
 def mat_to_csv(data_path:str, regenerate=False):
@@ -41,51 +41,50 @@ def mat_to_csv(data_path:str, regenerate=False):
         print("Creating rating_df, trust_df...")
         dataset_name = data_path.split('/')[-1]
 
-        # rating_df
-        rating_df = pd.read_csv(os.path.join(data_path, 'rating_org.csv'))
+        # original csv file
+        rating_org = os.path.join(data_path, 'rating_org.csv')
+        trust_org = os.path.join(data_path, 'trustnetwork_org.csv')
+        if os.path.isfile(rating_org) & os.path.isfile(trust_org):
+            rating_df = pd.read_csv(rating_org)
+            trust_df = pd.read_csv(trust_org)
+        else:
+            rating_df, trust_df = prepare_org_data(data_path)
+
         rating_df = rating_df[['user_id','product_id','rating']]
-        # trust_df
-        trust_df = pd.read_csv(os.path.join(data_path, 'trustnetwork_org.csv'))
         trust_df = trust_df[['user_id_1', 'user_id_2']]
+        
+        rating_df = rating_df.dropna(how='any')
+        rating_df = rating_df.drop_duplicates(['user_id','product_id'], keep='first')
+        rating_df = rating_df[rating_df.rating.between(1,5,inclusive='both')]
+        trust_df = trust_df.dropna(how='any')
+        trust_df = trust_df.drop_duplicates(keep='first')
+        
+        if dataset_name in ['yelp', 'Douban']:
+            # 1. user당 rating이 너무 적은 경우 제외
+            rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
+            # trust를 기준으로 user를 sampling
+            trust_df = trust_df.sample(15000000, random_state=42, replace=False)
+            
         rating_df, trust_df = reset_and_filter_data(rating_df, trust_df)
-        if len(rating_df) > 1500000: # yelp인 경우 sampling
-            # 1M sample
-            np.random.seed(42)
-            sample_indices = np.random.choice(rating_df.index, 1000000, replace=False)
-            rating_df = rating_df.loc[sample_indices]
-            users = rating_df.user_id.unique()
-            # filter social
-            trust_df = trust_df[trust_df.user_id_1.isin(users)&trust_df.user_id_2.isin(users)]
-            # Encoding
-            total_users = list(set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())))
-            total_items = list(rating_df.product_id.unique())
-
-            user_dict = dict(zip(total_users, range(1,len(total_users)+1)))
-            item_dict = dict(zip(total_items, range(1,len(total_items)+1)))
-
-            rating_df['user_id'] = rating_df['user_id'].map(user_dict)
-            rating_df['product_id'] = rating_df['product_id'].map(item_dict)
-
-            trust_df['user_id_1'] = trust_df['user_id_1'].map(user_dict)
-            trust_df['user_id_2'] = trust_df['user_id_2'].map(user_dict)       
 
         # 전체 user-item rating 정보를 담은 rating matrix 생성
         rating_matrix = sparse.lil_matrix((max(rating_df['user_id'].unique())+1, max(rating_df['product_id'].unique())+1), dtype=np.ubyte)
 
         for index in rating_df.index:
             rating_matrix[rating_df['user_id'][index], rating_df['product_id'][index]] = rating_df['rating'][index]
-        rating_matrix = rating_matrix.toarray()
-        np.save(data_path + '/rating_matrix.npy', rating_matrix)
+            
+        rating_matrix = rating_matrix.tocsr()
+        sparse.save_npz(os.path.join(data_path, 'rating_matrix.npz'), rating_matrix) # csr matrix 형태로 저장
+        # rating_matrix = rating_matrix.toarray()
+        # np.save(data_path + '/rating_matrix.npy', rating_matrix)
 
-        # 저장되는 .csv 파일은 user filter & id re-arrange가 완료된 .csv 파일
-        # 따라서 이 함수가 한번 실행된 이후로는 사용 X.
         rating_df.to_csv(data_path + '/rating.csv', index=False)
         trust_df.to_csv(data_path + '/trustnetwork.csv', index=False)
     
     # data statistics
     print(f"***** Dataset Statistics *****")
-    assert rating_df.user_id.nunique()==rating_df.user_id.max()
-    print(f"# of users : {rating_df.user_id.nunique()}")
+    print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())+1}")
+    print(f"# of users in rating df : {rating_df.user_id.nunique()}")
     assert rating_df.product_id.nunique()==rating_df.product_id.max()
     print(f"# of items : {rating_df.product_id.nunique()}")
     print(f"# of interactions : {rating_df.shape[0]}")
@@ -95,19 +94,12 @@ def mat_to_csv(data_path:str, regenerate=False):
 
 def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:
     # Filter Dups / Nulls / Useless values
-    rating_df = rating_df.dropna(how='any')
-    rating_df = rating_df.drop_duplicates(['user_id','product_id'], keep='first')
-    rating_df = rating_df[rating_df.rating.between(1,5,inclusive='both')]
-    trust_df = trust_df.dropna(how='any')
-    trust_df = trust_df.drop_duplicates(keep='first')
+    
 
     # filter data by users(existing in both columns in trust_df)
-    # total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
     total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).union(set(rating_df.user_id.unique()))
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
     trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
-    total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
-    rating_df = rating_df[rating_df.user_id.isin(total_users)]
 
     
     # Generate user id mapping table
@@ -125,13 +117,14 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
 def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False):
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
-    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    # valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
-    if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regenerate)):
+    # if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regenerate)):
+    if os.path.isfile(train_path) & os.path.isfile(test_path) & (not regenerate):
         print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
-        rating_valid_set = pd.read_csv(valid_path)
+        # rating_valid_set = pd.read_csv(valid_path)
         rating_test_set = pd.read_csv(test_path)
         
     else:
@@ -153,24 +146,24 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False
     
     return rating_train_set, rating_valid_set, rating_test_set
 
-def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, seed:int=42, regenerate=False):
+def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, trust_df, seed:int=42, regenerate=False):
     """
     Generate social graph from train/test/validation dataset
     """
-    split_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
+    social_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
     rating_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
-    if (not os.path.isfile(split_file)) or regenerate:
+    if (not os.path.isfile(social_file)) or regenerate:
         print(f"Creating Social {split} split sets...\n")
-        trust_dataframe = pd.read_csv(data_path + '/trustnetwork.csv', index_col=[]) # social interaction
+        # trust_df = pd.read_csv(data_path + '/trustnetwork_org.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
-        social_split = trust_dataframe[(trust_dataframe['user_id_1'].isin(users)) & (trust_dataframe['user_id_2'].isin(users))]
+        social_split = trust_df[(trust_df['user_id_1'].isin(users)) | (trust_df['user_id_2'].isin(users))]
 
         # save
-        social_split.to_csv(split_file, index=False)
+        social_split.to_csv(social_file, index=False)
         rating_split.to_csv(rating_file, index=False)
     else:
         print("Loading Social split sets...\n")
-        social_split = pd.read_csv(split_file)
+        social_split = pd.read_csv(social_file)
         rating_split = pd.read_csv(rating_file)
     
     return social_split, rating_split
@@ -239,7 +232,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
             anchor_nodes = social_split.nodes()
     else:
         anchor_nodes = social_split.nodes()
-
+    # save dir 지정
     if split=='train':
         file_path = os.path.join(data_path, f"social_user_{len(social_split.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
     elif split=='valid':
@@ -271,7 +264,8 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
                 while wl < walk_length-1:
                     # 처음 : random next node 추출 후, append
                     if wl == 0:
-                        next_node = find_next_node(social_split, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
+                        # next_node = find_next_node(social_split, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
+                        next_node = find_next_node(social_split, previous_node=None, current_node=nodes)
                     # 처음이 아닌 경우
                     else:
                         # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
@@ -279,7 +273,8 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
                             next_node = 0
                         # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
                         else:
-                            next_node = find_next_node(social_split, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+                            # next_node = find_next_node(social_split, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+                            next_node = find_next_node(social_split, previous_node=seqs[-2], current_node=seqs[-1])
                             if next_node in seqs:
                                 threshold+=1
                                 if threshold > 10:
@@ -291,7 +286,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
                     wl += 1
             
                 # revised
-                degrees = [0 if node==0 else user_degree_dic[node] for node in seqs]
+                degrees = [0 if node==0 else user_degree_dic.get(node, 0) for node in seqs]
                 tmp = [nodes, seqs, degrees]
                 # 중복 확인
                 s2.add(tuple(seqs))
@@ -323,10 +318,10 @@ def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS): # 확�
         
     select_probabilities_sum = sum(select_probabilities.values())
     select_probabilities = {k: v/select_probabilities_sum/(1-RETURN_PARAMS) for k, v in select_probabilities.items()}
-    
+
     if previous_node is not None:
         select_probabilities[previous_node]=RETURN_PARAMS # 이 노드는 RETURN_PARAMS에 의해 결정됨. 
-    
+
     if select_probabilities_sum == 0:
         return 0
     
@@ -334,30 +329,35 @@ def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS): # 확�
         a=[k for k in select_probabilities.keys()],
         p=[v for v in select_probabilities.values()]
     )
+
     return selected_node
 
-def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
+def find_next_node(input_G, previous_node, current_node): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
     # 문제 : neighbor가 많을 경우에, 이전 노드로 돌아갈 확률이 다른 노드로 갈 확률보다 높아짐 -> 의도된 것?
     # return param을 고정하지않고, neighbor의 개수에 따라 유동적으로 변하는게 합리적임 -> n개의 neighbor가 있으면, x = (1/n)*n + return, 1 = (1/nx)*n + return/x
         
-    select_probabilities = {}
-    
-    for node in input_G.neighbors(current_node):
-        if node != previous_node:
-            select_probabilities[node] = 1 
-        else:
-            select_probabilities[node] = 0.5
-        
-    select_probabilities_sum = sum(select_probabilities.values())
-    select_probabilities = {k: v/select_probabilities_sum for k, v in select_probabilities.items()}
-    
-    if select_probabilities_sum == 0:
+    neighbors = list(input_G.neighbors(current_node))
+    n = len(neighbors)
+
+    if previous_node is not None:
+        return_prob = 1/(n+max(n,2))
+        edge_prob = (1-return_prob)/n
+        # 정규화(sum=1)
+        _sum = return_prob+n*edge_prob
+        return_prob /= _sum
+        edge_prob /= _sum
+
+        candidates = neighbors + [previous_node]
+        probs = [edge_prob for _ in range(n)]+[return_prob]
+    else:
+        edge_prob = 1/n
+        candidates = neighbors
+        probs = [edge_prob for _ in range(n)]
+
+    selected_node = np.random.choice(candidates, p=probs)
+    if len(probs)==0:
         return 0
     
-    selected_node = np.random.choice(
-        a=[k for k in select_probabilities.keys()],
-        p=[v for v in select_probabilities.values()]
-    )
     return selected_node
 
 def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame, random_walk_valid:pd.DataFrame, random_walk_test:pd.DataFrame, train_path:str, valid_path:str, test_path:str, regenerate:bool):
@@ -433,7 +433,8 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         # spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
         
         # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.
-        rating_matrix = np.load(data_path + '/rating_matrix.npy')
+        rating_matrix = sparse.load_npz(os.path.join(data_path, 'rating_matrix.npz'))
+        # rating_matrix = np.load(data_path + '/rating_matrix.npy')
         
         # str type으로 저장된 데이터 list로 변환 
         user_df['random_walk_seq'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
@@ -457,9 +458,19 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         del all_item, all_degree
         
         test_user_product_dict = {}
+
+
+        def user_item(user):
+            items = user_product_dic.get(user, [0,0,0,0])
+            return items
+        
+        def user_rating(user):
+            ratings = user_rating_dic.get(user, [0,0,0,0])
+            return ratings
+
         # user당 item mapping하는 함수 + Test셋에서 사용한 조합(user-item) train셋에서 중복 제거
         def map_user_item(user):
-            items = list(set(user_product_dic[user]) - set(test_user_item.setdefault(user,[])))
+            items = list(set(user_product_dic.get(user, [0,0,0,0])) - set(test_user_item.setdefault(user,[])))
             items = list(set(items)-set([0])) # drop duplicates + 0 제외
             
             if len(items)>item_per_user:
@@ -475,8 +486,8 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
             
             return list(selected_items)
         
-        tqdm.pandas()
         total_df = pd.DataFrame()
+        tqdm.pandas()
 
         # user
         total_df['user_id'] = user_df['user_id']
@@ -487,9 +498,11 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         # item(anchor user에 해당)
         print("Processing Item sequences / Degrees ...")
         total_df['anchor_degree'] = total_df['user_degree'].map(lambda x:x[0])
-        total_df['anchor_items'] = total_df['user_id'].map(user_product_dic)
+        # total_df['anchor_items'] = total_df['user_id'].map(user_product_dic)
+        total_df['anchor_items'] = total_df['user_id'].map(user_item)
         total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
-        total_df['anchor_ratings'] = total_df['user_id'].map(user_rating_dic)
+        # total_df['anchor_ratings'] = total_df['user_id'].map(user_rating_dic)
+        total_df['anchor_ratings'] = total_df['user_id'].map(user_rating)
         total_df['anchor_ratings'] = total_df['anchor_ratings'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df = total_df.explode(['anchor_items','anchor_ratings'])
         total_df = total_df.drop_duplicates(subset='user_id',keep='first')
@@ -513,7 +526,8 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         
         # rating matrix(user-item)
         print("Processing Rating Matrix ...")
-        total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
+        total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray().astype(int)), axis=1)
+        # total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
         
         del rating_matrix
         
