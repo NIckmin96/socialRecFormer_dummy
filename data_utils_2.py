@@ -215,22 +215,22 @@ def generate_interacted_items_table(data_path:str, rating_split:pd.DataFrame, de
     return user_item_dataframe
 
 
-def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFrame, user_degree:pd.DataFrame, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10, test_augs:bool=False, regenerate:bool=False):
+def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFrame, social_split:pd.DataFrame, user_degree:pd.DataFrame, walk_length:int=5, data_split_seed:int=42, split:str='train', return_params:int=1, train_augs:int=10, test_augs:bool=False, regenerate:bool=False):
     # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
     # Data augmentation -> node 복제
     if split=='train':
-        anchor_nodes = np.repeat(social_graph.nodes(), train_augs)
+        anchor_nodes = np.repeat(rating_split.user_id.values, train_augs)
     elif split=='test':
         if test_augs:
             test_augs = min(train_augs, 3) # test set augmentation은 최대 3배까지
-            anchor_nodes = np.repeat(social_graph.nodes(), test_augs)
+            anchor_nodes = np.repeat(rating_split.user_id.values, test_augs)
         else:
-            anchor_nodes = social_graph.nodes()
+            anchor_nodes = rating_split.user_id.values
     else:
-        anchor_nodes = social_graph.nodes()
+        anchor_nodes = rating_split.user_id.values
     # save dir 지정
     if split=='train':
         file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
