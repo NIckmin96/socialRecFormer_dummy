@@ -223,7 +223,7 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
     # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
-    social_graph = nx.from_pandas_edgelist(social_graph, source='user_id_1', target='user_id_2')
+    social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
     # Data augmentation -> node 복제
     if split=='train':
         anchor_nodes = np.repeat(social_graph.nodes(), train_augs)
@@ -262,38 +262,31 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
             while True:
                 seqs = [nodes]
                 wl = 1
-                threshold = 0
-                s2 = set()
-                while wl < walk_length:
+                while wl<walk_length:
                     # 처음 : random next node 추출 후, append
                     if wl == 1:
                         # next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
                         next_node = find_next_node(social_graph, previous_node=None, current_node=nodes)
                     # 처음이 아닌 경우
                     else:
-                        # 가장 최근 노드가 '0'인 경우 : 다음도 '0'
-                        if seqs[-1]==0:
-                            next_node = 0
-                        # 그렇지 않은 경우 : random node 추출, 이미 추가된 노드이면 threshold올리고 다시 추출, threshold 넘으면 '0' append
-                        else:
-                            # next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
-                            next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1])
-                            if next_node in seqs:
-                                threshold+=1
-                                if threshold > 10:
-                                    next_node = 0
-                                else:
-                                    continue
+                        # next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
+                        next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1])
+                        # 중복 노드가 존재하는 경우, 제외하고 random choice
+                        if next_node in seqs:
+                            available = set(social_graph.nodes())-set(seqs)
+                            if available:
+                                next_node = np.random.choice(list(set(social_graph.nodes())-set(seqs)))
+                            else:
+                                next_node = 0
+                                
                     # next node 추가 후, walk length 하나 올림
                     seqs.append(next_node)
                     wl += 1
-            
-                # revised
-                degrees = [0 if node==0 else user_degree_dic.get(node, 0) for node in seqs]
-                tmp = [nodes, seqs, degrees]
-                # 중복 확인
-                s2.add(tuple(seqs))
-                if s2&seq_set: # 중복되는 sequence가 있는 경우에 sequence 재생성
+                
+                    # revised
+                    degrees = [0 if node==0 else user_degree_dic.get(node, 0) for node in seqs]
+                # 완전 동일한 sequence가 있는지 확인
+                if tuple(seqs) in seq_set:
                     print("삐삐빅")
                     continue
                 else:
@@ -309,40 +302,20 @@ def generate_social_random_walk_sequence(data_path:str, social_split:pd.DataFram
 
     return df, file_path
 
-def find_next_node(input_G, previous_node, current_node, RETURN_PARAMS): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
-    # 문제 : neighbor가 많을 경우에, 이전 노드로 돌아갈 확률이 다른 노드로 갈 확률보다 높아짐 -> 의도된 것?
-    # return param을 고정하지않고, neighbor의 개수에 따라 유동적으로 변하는게 합리적임 -> n개의 neighbor가 있으면, x = (1/n)*n + return, 1 = (1/nx)*n + return/x
-        
-    select_probabilities = {}
-    
-    for node in input_G.neighbors(current_node):
-        if node != previous_node:
-            select_probabilities[node] = 1 
-        
-    select_probabilities_sum = sum(select_probabilities.values())
-    select_probabilities = {k: v/select_probabilities_sum/(1-RETURN_PARAMS) for k, v in select_probabilities.items()}
-
-    if previous_node is not None:
-        select_probabilities[previous_node]=RETURN_PARAMS # 이 노드는 RETURN_PARAMS에 의해 결정됨. 
-
-    if select_probabilities_sum == 0:
-        return 0
-    
-    selected_node = np.random.choice(
-        a=[k for k in select_probabilities.keys()],
-        p=[v for v in select_probabilities.values()]
-    )
-
-    return selected_node
-
 def find_next_node(input_G, previous_node, current_node): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
     # 문제 : neighbor가 많을 경우에, 이전 노드로 돌아갈 확률이 다른 노드로 갈 확률보다 높아짐 -> 의도된 것?
     # return param을 고정하지않고, neighbor의 개수에 따라 유동적으로 변하는게 합리적임 -> n개의 neighbor가 있으면, x = (1/n)*n + return, 1 = (1/nx)*n + return/x
         
-    neighbors = set(list(input_G.neighbors(current_node)))-{previous_node}
+    if current_node!=0:
+        neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
+    else:
+        neighbors = list(input_G.nodes())
     n = len(neighbors)
+    
+    if n==0:
+        return 0
 
-    if previous_node is not None:
+    if previous_node not in [None,0]:
         return_prob = 1/(n+max(n,2))
         edge_prob = (1-return_prob)/n
         # 정규화(sum=1)
@@ -358,16 +331,12 @@ def find_next_node(input_G, previous_node, current_node): # 확률적으로, anc
         probs = [edge_prob for _ in range(n)]
 
     selected_node = np.random.choice(candidates, p=probs)
-    if len(probs)==0:
-        return 0
+    
     
     return selected_node
 
 def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame, random_walk_valid:pd.DataFrame, random_walk_test:pd.DataFrame, train_path:str, valid_path:str, test_path:str, regenerate:bool):
     if regenerate:
-        random_walk_train = random_walk_train.drop_duplicates('random_walk_seq')
-        random_walk_valid = random_walk_valid.drop_duplicates('random_walk_seq')
-        random_walk_test = random_walk_test.drop_duplicates('random_walk_seq')
         random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
         random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_valid['random_walk_seq'])]
         random_walk_valid = random_walk_valid[~random_walk_valid['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
@@ -385,24 +354,7 @@ def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame
 def union_user_item_dict(test_dict, valid_dict):
     for k,v in valid_dict.items():
         test_dict[k] = list(set(v).union(set(test_dict.get(k,[]))))
-    return test_dict
-
-def slice_and_pad_list(input_list:list, slice_length:int):
-
-    num_slices = math.ceil(len(input_list) / slice_length)
-    # Pad input list with 0
-    input_list += [0] * (slice_length * num_slices - len(input_list))
-    # Create sliced & padded list
-    result_list = [input_list[i:i + slice_length] for i in range(0, len(input_list), slice_length)]
-
-    return result_list
-    
-# Load dataset & convert data type
-def str_to_list(x):
-    if type(x)==str:
-        return literal_eval(x)
-    else:
-        return x 
+    return test_dict   
     
 def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.DataFrame, seed:int, split:str, random_walk_len:int=30, item_per_user:int=5, return_params:int=1, train_augs:int=1, test_augs:bool=True, rating_thres:int=3, regenerate:bool=False, test_user_item:dict={}):
 
@@ -432,12 +384,15 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
     else:
         print(f"{split} total df(input_sequence_data) doesn't exist!")
         print(f"Creating {split} total df(input_sequence_data)...")
-        # Load SPD table => 각 sequence마다 [seq_len_user, seq_len_user] 크기의 SPD matrix를 생성하도록.
-        # spd_table = torch.from_numpy(np.load(data_path + '/' + spd_path)).long()
         
-        # Load rating table => 마찬가지로 각 sequence마다 [seq_len_user, seq_len_item] 크기의 rating matrix를 생성하도록.
         rating_matrix = sparse.load_npz(os.path.join(data_path, 'rating_matrix.npz'))
-        # rating_matrix = np.load(data_path + '/rating_matrix.npy')
+        
+        # Load dataset & convert data type
+        def str_to_list(x):
+            if type(x)==str:
+                return literal_eval(x)
+            else:
+                return x 
         
         # str type으로 저장된 데이터 list로 변환 
         user_df['random_walk_seq'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
@@ -470,6 +425,15 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         def user_rating(user):
             ratings = user_rating_dic.get(user, [0,0,0,0])
             return ratings
+            
+        def slice_and_pad_list(input_list:list, slice_length:int):
+            num_slices = math.ceil(len(input_list) / slice_length)
+            # Pad input list with 0
+            input_list += [0] * (slice_length * num_slices - len(input_list))
+            # Create sliced & padded list
+            result_list = [input_list[i:i + slice_length] for i in range(0, len(input_list), slice_length)]
+
+            return result_list
 
         # user당 item mapping하는 함수 + Test셋에서 사용한 조합(user-item) train셋에서 중복 제거
         def map_user_item(user):
