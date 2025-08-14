@@ -331,15 +331,100 @@ def eval(model, ds_iter):
         print(len(ndcg_dict.values()))
         total_ndcg2_10 = np.mean(list(ndcg_dict.values()))
         print(f"ndcg2@10 : {total_ndcg2_10}")
-        
-        
-    parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
 
     end.record(stream)
     torch.cuda.synchronize()
 
     print("\n [Evaluation Results]")
     print("Loss: %2.5f" % eval_losses.avg)
+    print("RMSE: %2.5f" % total_rmse)
+    print("MAE: %2.5f" % total_mae)
+    print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
+    print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
+    print(f"total eval time: {(start.elapsed_time(end))}")
+    print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
+    print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
+    
+def eval2(model, ds_iter):
+    model.eval()
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    stream = torch.cuda.current_stream(device=device)
+    start.record(stream)
+    with torch.no_grad():
+        epoch_iterator = tqdm(ds_iter['test'],
+                        desc="Validating (X / X Steps) (loss=X.X)",
+                        ascii=" =",
+                        bar_format="{l_bar}{r_bar}",
+                        dynamic_ncols=True,
+                        leave=False)
+
+        user_list, product_list, rating_list, logit_list = [],[],[],[]
+        total_rmse, total_mae = 0.0, 0.0
+        total_precision_5, total_precision_10 = 0.0, 0.0
+        total_recall_5, total_recall_10 = 0.0, 0.0
+        total_ndcg_5, total_ndcg_10 = 0.0, 0.0
+        
+        # NDCG : user별 중복 계산(input이 다르므로, 다른 결과 발생) -> 1. 그 중에서 best를 선택하는 코드
+        ndcg_df = pd.DataFrame()
+        with torch.no_grad():
+            for step, batch in enumerate(epoch_iterator):
+                
+                batch['item_rating'] = batch['item_rating'].to(device)
+                batch['anchor_user'] = batch['anchor_user'].to(device)
+                batch['anchor_items'] = batch['anchor_items'].to(device)
+                batch['imp_fdback'] = batch['imp_fdback'].to(device)
+                batch['exp_fdback'] = batch['exp_fdback'].to(device)
+                
+                rank_logits, rating_pred, _, _ = model(batch, is_train=False)
+                mask = (batch['item_rating'] != 0)
+                rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
+                mae = MAE(rating_pred, batch['item_rating'], mask)
+                total_rmse += rmse
+                total_mae += mae
+                
+                # rank metric
+                df = pd.DataFrame({'users':batch['anchor_user'].data.cpu(),
+                                   'items':batch['anchor_items'].data.cpu(),
+                                   'ratings':batch['exp_fdback'].data.cpu(),
+                                   'logits':rank_logits.data.cpu()})
+                ndcg_df = pd.concat([ndcg_df, df], axis=0)                
+            
+                epoch_iterator.set_description(
+                            "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
+                
+        # calculate NDCG
+        
+        # ideal topk
+        _,ideal_idx = torch.topk(ndcg_df['ratings'].values,10)
+        ideal_items = torch.gather(ndcg_df['items'].values,-1,ideal_idx)
+        ideal_ratings = torch.gather(ndcg_df['ratings'].values,-1,ideal_idx)
+        # recommended topk
+        _,rec_idx = torch.topk(ndcg_df['logits'].values,10)
+        rec_items  = torch.gather(ndcg_df['items'].values,-1,rec_idx)
+        rec_ratings = torch.gather(ndcg_df['ratings'].values,-1,rec_idx)
+        # ideal items에 있는지 확인
+        rec_mask = torch.stack([torch.where(torch.isin(rec_items[i], ideal_items[i]), torch.tensor(1), torch.tensor(0)) for i in range(rec_items.size(0))])
+        rec_ratings *= rec_mask
+        # dcg/idcg/ndcg
+        discount = torch.log2(torch.arange(10)+2)
+        dcg = torch.sum(rec_ratings/discount, dim=-1)
+        idcg = torch.sum(ideal_ratings/discount, dim=-1)
+        ndcg = dcg/(idcg+1e-10)
+        ndcg_df['NDCG'] = ndcg
+        # Leave Best
+        ndcg_df = ndcg_df.sort_values(by='NDCG', ascending=False).drop_duplicates(subset='users', keep='first')
+        total_ndcg = torch.mean(ndcg_df['NDCG'])
+        print(total_ndcg)
+                
+        total_rmse /= (step+1)
+        total_mae /= (step+1)
+
+    end.record(stream)
+    torch.cuda.synchronize()
+
+    print("\n [Evaluation Results]")
     print("RMSE: %2.5f" % total_rmse)
     print("MAE: %2.5f" % total_mae)
     print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
@@ -525,10 +610,6 @@ def main():
     print(f"GPU index: {device.index}")
     print("\n")
     
-    # debug
-    # device = torch.device("cpu")
-    # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-    
     model = model.to(device)
 
     ############################################################ training preparation ############################################################
@@ -539,8 +620,6 @@ def main():
         betas=(0.9, 0.999), eps=1e-6, weight_decay=training_config["weight_decay"]
     )
 
-    # total_steps는 cycle당 있는 step 수. 없다면 epoch와 steps_per_epoch를 전댈해야함.
-        # steps_per_epoch는 한 epoch에서의 전체 step 수: (total_number_of_train_samples / batch_size)
     training_config["num_train_steps"] = len(ds_iter['train'])
 
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -552,33 +631,6 @@ def main():
         # min_lr = 1e-6,
         verbose = True
     )
-
-    ############################################################ parameter tuning ############################################################
-
-    # search_space = {
-    #     "d_model" : tune.grid_search([64, 128, 256]),
-    #     "d_ffn" : tune.grid_search([256, 512, 1024]),
-    #     "dropout" : tune.uniform(0.1,0.3),
-    #     "weight_decay": tune.uniform(0.01, 0.1)
-    # }
-
-    # ray_scheduler = ASHAScheduler(
-    #     metric="loss",
-    #     mode="min",
-    #     max_t=training_config["num_epochs"],
-    #     grace_period=10,
-    #     reduction_factor=3
-    # )
-    
-    # tuner = tune.Tuner(
-    #     train,
-    #     param_space=search_space,
-    #     num_samples=5,
-    #     scheduler=ray_scheduler
-    # )
-
-    # results = tuner.fit()
-    # best_result = results.get_best_result("loss", "min")
 
     ### TensorBoard writer preparation ###
     writer = SummaryWriter(os.path.join(log_dir,f"{args.name}.tensorboard"))
@@ -596,7 +648,7 @@ def main():
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint["model_state_dict"])
         print("loading the best model from: " + checkpoint_path)
-        eval(model, ds_iter)
+        eval2(model, ds_iter)
 
     torch.cuda.empty_cache()
 

@@ -242,15 +242,16 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     else:
         anchor_nodes = anchor_nodes
     # save dir 지정
-    if split=='train':
-        file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
-    elif split=='valid':
-        file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
-    else:
-        if test_augs:
-            file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{test_augs}times.csv")
-        else:
-            file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
+    file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
+    # if split=='train':
+    #     file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
+    # elif split=='valid':
+    #     file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
+    # else:
+    #     if test_augs:
+    #         file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{test_augs}times.csv")
+    #     else:
+    #         file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
 
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path)&(not regenerate):
