@@ -152,6 +152,16 @@ class RankMetric:
         NDCG = torch.mean(NDCG)
 
         return NDCG
+    
+    def NDCG2(self):
+        eps = 1e-10
+        discount = torch.log2(torch.arange(self.k)+2).to(self.device)
+        DCG = torch.sum(self.recommended_k_rating/discount, dim=-1)
+        IDCG = torch.sum(self.ideal_k_rating/discount, dim=-1)
+        NDCG = DCG/(IDCG+eps)
+        NDCG = NDCG/(torch.sum(self.mask, dim=-1)+eps)
+        
+        return NDCG
 
     def precision(self):
         total_precision = 0.0

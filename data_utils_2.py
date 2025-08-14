@@ -94,11 +94,13 @@ def mat_to_csv(data_path:str, regenerate=False):
 
 def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:   
     # filter data by users(existing in both columns in trust_df)
-    total_users = rating_df.user_id.unique()
+    # total_users = rating_df.user_id.unique()
+    total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
-    trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
+    trust_df = trust_df[trust_df.user_id_1.isin(total_users)|trust_df.user_id_2.isin(total_users)]
     
     # Generate user id mapping table
+    total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).union(set(rating_df.user_id.unique()))
     mapping_table_user = {user_id:idx+1 for idx,user_id in enumerate(total_users)}
     # Generate item id mapping table
     mapping_table_item = {item_id:idx+1 for idx,item_id in enumerate(rating_df['product_id'].unique())}    
@@ -152,7 +154,7 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
         print(f"Creating Social {split} split sets...\n")
         # trust_df = pd.read_csv(data_path + '/trustnetwork_org.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
-        social_split = trust_df[(trust_df['user_id_1'].isin(users)) & (trust_df['user_id_2'].isin(users))]
+        social_split = trust_df[(trust_df['user_id_1'].isin(users)) | (trust_df['user_id_2'].isin(users))]
 
         # save
         social_split.to_csv(social_file, index=False)
@@ -220,27 +222,35 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
+    rating_users = rating_split.user_id.unique()
+    user_counts = rating_split['user_id'].value_counts()
+    user_median = user_counts.median()
+    anchor_nodes = []
+    for user,cnt in user_counts.items():
+        k = int(min(user_median, cnt))
+        anchor_nodes.extend([user]*k)
+        
     # Data augmentation -> node 복제
     if split=='train':
-        anchor_nodes = np.repeat(rating_split.user_id.values, train_augs)
+        anchor_nodes = np.repeat(anchor_nodes, train_augs)
     elif split=='test':
         if test_augs:
             test_augs = min(train_augs, 3) # test set augmentation은 최대 3배까지
-            anchor_nodes = np.repeat(rating_split.user_id.values, test_augs)
+            anchor_nodes = np.repeat(anchor_nodes, test_augs)
         else:
-            anchor_nodes = rating_split.user_id.values
+            anchor_nodes = anchor_nodes
     else:
-        anchor_nodes = rating_split.user_id.values
+        anchor_nodes = anchor_nodes
     # save dir 지정
     if split=='train':
-        file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
+        file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{train_augs}times.csv")
     elif split=='valid':
-        file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
+        file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
     else:
         if test_augs:
-            file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{test_augs}times.csv")
+            file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{test_augs}times.csv")
         else:
-            file_path = os.path.join(data_path, f"social_user_{len(social_graph.nodes())}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
+            file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
 
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path)&(not regenerate):
@@ -250,19 +260,23 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     else:
         user_degree_dic = dict(zip(user_degree.user_id, user_degree.degree)) # for revised code(hashing)
         # random walk sequence
+        anchor_cnt = {n:0 for n in rating_users}
+        
         anchor_seq_degree = []
         seq_set = set()
         print(f"{split} random walk sequence file doesn't exist!")
         print(f"Creating {split} random walk sequence...")
-        for nodes in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
+        for node in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
+            if anchor_cnt[node]==user_median:
+                continue
             while True:
-                seqs = [nodes]
+                seqs = [node]
                 wl = 1
                 while wl<walk_length:
                     # 처음 : random next node 추출 후, append
                     if wl == 1:
                         # next_node = find_next_node(social_graph, previous_node=None, current_node=nodes, RETURN_PARAMS=0.0)
-                        next_node = find_next_node(social_graph, previous_node=None, current_node=nodes)
+                        next_node = find_next_node(social_graph, previous_node=None, current_node=node)
                     # 처음이 아닌 경우
                     else:
                         # next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1], RETURN_PARAMS=return_params/10)
@@ -288,7 +302,8 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
                 else:
                     break
                 
-            anchor_seq_degree.append([nodes,seqs,degrees])
+            anchor_cnt[node]+=1
+            anchor_seq_degree.append([node,seqs,degrees])
 
         # revised
         df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
@@ -301,7 +316,6 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
 def find_next_node(input_G, previous_node, current_node): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
     # 문제 : neighbor가 많을 경우에, 이전 노드로 돌아갈 확률이 다른 노드로 갈 확률보다 높아짐 -> 의도된 것?
     # return param을 고정하지않고, neighbor의 개수에 따라 유동적으로 변하는게 합리적임 -> n개의 neighbor가 있으면, x = (1/n)*n + return, 1 = (1/nx)*n + return/x
-        
     if current_node!=0:
         neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
     else:
@@ -327,7 +341,6 @@ def find_next_node(input_G, previous_node, current_node): # 확률적으로, anc
         probs = [edge_prob for _ in range(n)]
 
     selected_node = np.random.choice(candidates, p=probs)
-    
     
     return selected_node
 
@@ -468,7 +481,7 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         total_df['anchor_ratings'] = total_df['user_id'].map(user_rating)
         total_df['anchor_ratings'] = total_df['anchor_ratings'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df = total_df.explode(['anchor_items','anchor_ratings'])
-        total_df = total_df.drop_duplicates(subset='user_id',keep='first')
+        # total_df = total_df.drop_duplicates(subset='user_id',keep='first')
         total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
         total_df['imp_fdback'] = total_df['anchor_ratings'].map(lambda seq:list(map(lambda x:1 if x>=rating_thres else 0,seq)))
         # item(user sequence에 해당)\

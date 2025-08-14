@@ -1,9 +1,10 @@
 import os
+import argparse
 import pandas as pd
 import numpy as np
 from scipy.io import loadmat
 
-def prepare_org_data(data, side_info=False):
+def prepare_org_data(data, side_info=True):
     print("Processing _org.csv data...")
     # data_dir = os.path.join('dataset',data)
     data_dir = data
@@ -127,3 +128,12 @@ def prepare_org_data(data, side_info=False):
     print("DONE")
 
     return rating_df, trust_df
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data', type=str, default='ciao')
+    parser.add_argument('--side', type=bool, default=True)
+    args = parser.parse_args()
+    data_dir = os.path.join('dataset',args.data)
+    
+    prepare_org_data(data_dir, args.side)

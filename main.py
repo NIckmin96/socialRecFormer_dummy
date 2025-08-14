@@ -221,7 +221,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f}\n")
         if epoch > 100:
             break
-        if update_cnt > 100: 
+        if update_cnt > 15: 
             break
     writer.close()
 
@@ -254,8 +254,8 @@ def eval(model, ds_iter):
         total_recall_5, total_recall_10 = 0.0, 0.0
         total_ndcg_5, total_ndcg_10 = 0.0, 0.0
         
-        # check용
-        df = pd.DataFrame(columns=['user_id','product_id','rating','logits'])
+        # NDCG : user별 중복 계산(input이 다르므로, 다른 결과 발생) -> 1. 그 중에서 best를 선택하는 코드
+        ndcg_dict = dict()
         
         for step, batch in enumerate(epoch_iterator):
             
@@ -284,9 +284,6 @@ def eval(model, ds_iter):
             trg.append(batch['item_rating'])
             msk.append(mask)
             
-            # check
-            df = pd.concat([df, pd.DataFrame({"user_id":batch['anchor_user'].to('cpu').tolist(), "product_id":batch['anchor_items'].to('cpu').tolist(), "rating":batch['exp_fdback'].to('cpu').tolist(), "logits":rank_logits.tolist()})])
-            
             # Rank Valid Result
             rank_eval_5 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=5)
             precision_5 = rank_eval_5.precision()
@@ -302,6 +299,13 @@ def eval(model, ds_iter):
             precision_10 = rank_eval_10.precision()
             recall_10 = rank_eval_10.recall()
             ndcg_10 = rank_eval_10.NDCG()
+            
+            ndcg2_10 = rank_eval_10.NDCG2()
+            for u,n in zip(batch['anchor_user'], ndcg2_10.squeeze()):
+                if n.item() > ndcg_dict.get(u.item(),0):
+                    ndcg_dict[u.item()] = n.item()
+                else:
+                    ndcg_dict[u.item()] = ndcg_dict.get(u,0)
             
             total_precision_10 += precision_10
             total_recall_10 += recall_10
@@ -324,6 +328,10 @@ def eval(model, ds_iter):
         total_recall_10 /= (step+1)
         total_precision_10 /= (step+1)
         
+        print(len(ndcg_dict.values()))
+        total_ndcg2_10 = np.mean(list(ndcg_dict.values()))
+        print(f"ndcg2@10 : {total_ndcg2_10}")
+        
         
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
 
@@ -339,10 +347,6 @@ def eval(model, ds_iter):
     print(f"total eval time: {(start.elapsed_time(end))}")
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
-    
-    # check
-    df.to_csv('after_test.csv', index=False)
-
     
 def get_args():
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
