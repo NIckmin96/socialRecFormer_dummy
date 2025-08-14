@@ -188,10 +188,11 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
             # compute loss
             mask = (batch['item_rating'] != 0)
-            org_loss = RMSE(rating_pred, batch['item_rating'], mask)
+            org_loss = MSE(rating_pred, batch['item_rating'], mask)
             y_rank_value = F.softmax(batch['exp_fdback'].float(), dim=-1)
-            rank_loss = RMSE(rank_logits, y_rank_value)
+            rank_loss = MSE(rank_logits, y_rank_value)
             loss = org_loss + rank_loss
+            # loss = org_loss
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -221,7 +222,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f}\n")
         if epoch > 100:
             break
-        if update_cnt > 100: 
+        if update_cnt > 50: 
             break
     writer.close()
 
@@ -254,9 +255,6 @@ def eval(model, ds_iter):
         total_recall_5, total_recall_10 = 0.0, 0.0
         total_ndcg_5, total_ndcg_10 = 0.0, 0.0
         
-        # check용
-        df = pd.DataFrame(columns=['user_id','product_id','rating','logits'])
-        
         for step, batch in enumerate(epoch_iterator):
             
             # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
@@ -283,9 +281,6 @@ def eval(model, ds_iter):
             pred.append(rating_pred)
             trg.append(batch['item_rating'])
             msk.append(mask)
-            
-            # check
-            df = pd.concat([df, pd.DataFrame({"user_id":batch['anchor_user'].to('cpu').tolist(), "product_id":batch['anchor_items'].to('cpu').tolist(), "rating":batch['exp_fdback'].to('cpu').tolist(), "logits":rank_logits.tolist()})])
             
             # Rank Valid Result
             rank_eval_5 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=5)
@@ -339,10 +334,6 @@ def eval(model, ds_iter):
     print(f"total eval time: {(start.elapsed_time(end))}")
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
-    
-    # check
-    df.to_csv('after_test.csv', index=False)
-
     
 def get_args():
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
