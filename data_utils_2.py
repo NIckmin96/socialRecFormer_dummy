@@ -371,13 +371,14 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
     # spd_path = 'shortest_path_result.npy'
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
-    if split=='train':
-        total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
-    elif split=='valid':
-        total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
-    else:
-        test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
-        total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
+    total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}.pkl"
+    # if split=='train':
+    #     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
+    # elif split=='valid':
+    #     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
+    # else:
+    #     test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
+    #     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(not regenerate):
@@ -501,10 +502,8 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         
         del product_degree_dic, user_product_dic, user_rating_dic
         
-        # rating matrix(user-item)
         print("Processing Rating Matrix ...")
         total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray().astype(int)), axis=1)
-        # total_df['item_rating'] = total_df.progress_apply(lambda x:torch.LongTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].astype(int)), axis=1)
         
         del rating_matrix
         

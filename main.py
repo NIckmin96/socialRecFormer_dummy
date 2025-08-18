@@ -152,10 +152,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     init_t = time.time()
     total_time = 0
     update_cnt = 0
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    stream = torch.cuda.current_stream(device=device)
-    start.record(stream)
+    
+    if device.type=='cuda':
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        stream = torch.cuda.current_stream(device=device)
+        start.record(stream)
 
     # Training step
     for epoch in range(total_epochs):
@@ -204,8 +206,10 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
             
         # validation
-        end.record(stream)
-        torch.cuda.synchronize()
+        if device.type=='cuda':
+            end.record(stream)
+            torch.cuda.synchronize()
+            
         total_time += (start.elapsed_time(end))
         valid_loss, best_rmse, best_mae, best_ndcg, valid_rmse, valid_mae, update_cnt, org_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
@@ -238,10 +242,12 @@ def eval(model, ds_iter):
     eval_losses = AverageMeter()
     model.eval()
 
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    stream = torch.cuda.current_stream(device=device)
-    start.record(stream)
+    if device.type=='cuda':
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        stream = torch.cuda.current_stream(device=device)
+        start.record(stream)
+        
     with torch.no_grad():
         epoch_iterator = tqdm(ds_iter['test'],
                         desc="Validating (X / X Steps) (loss=X.X)",
@@ -332,8 +338,9 @@ def eval(model, ds_iter):
         total_ndcg2_10 = np.mean(list(ndcg_dict.values()))
         print(f"ndcg2@10 : {total_ndcg2_10}")
 
-    end.record(stream)
-    torch.cuda.synchronize()
+    if device.type=='cuda':
+        end.record(stream)
+        torch.cuda.synchronize()
 
     print("\n [Evaluation Results]")
     print("Loss: %2.5f" % eval_losses.avg)
@@ -347,11 +354,12 @@ def eval(model, ds_iter):
     
 def eval2(model, ds_iter):
     model.eval()
-
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    stream = torch.cuda.current_stream(device=device)
-    start.record(stream)
+    if device.type=='cuda':
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        stream = torch.cuda.current_stream(device=device)
+        start.record(stream)
+        
     with torch.no_grad():
         epoch_iterator = tqdm(ds_iter['test'],
                         desc="Validating (X / X Steps) (loss=X.X)",
@@ -360,7 +368,6 @@ def eval2(model, ds_iter):
                         dynamic_ncols=True,
                         leave=False)
 
-        user_list, product_list, rating_list, logit_list = [],[],[],[]
         total_rmse, total_mae = 0.0, 0.0
         total_precision_5, total_precision_10 = 0.0, 0.0
         total_recall_5, total_recall_10 = 0.0, 0.0
@@ -369,11 +376,16 @@ def eval2(model, ds_iter):
         # NDCG : user별 중복 계산(input이 다르므로, 다른 결과 발생) -> 1. 그 중에서 best를 선택하는 코드
         ndcg_df = pd.DataFrame()
         with torch.no_grad():
-            for step, batch in enumerate(epoch_iterator):
-                
+            for step, batch in enumerate(epoch_iterator):     
+                batch['user_seq'] = batch['user_seq'].to(device)
+                batch['user_degree'] = batch['user_degree'].to(device)
+                batch['item_list'] = batch['item_list'].to(device)
+                batch['item_degree'] = batch['item_degree'].to(device)
                 batch['item_rating'] = batch['item_rating'].to(device)
                 batch['anchor_user'] = batch['anchor_user'].to(device)
+                batch['anchor_degree'] = batch['anchor_degree'].to(device)
                 batch['anchor_items'] = batch['anchor_items'].to(device)
+                batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
                 batch['imp_fdback'] = batch['imp_fdback'].to(device)
                 batch['exp_fdback'] = batch['exp_fdback'].to(device)
                 
@@ -384,45 +396,56 @@ def eval2(model, ds_iter):
                 total_rmse += rmse
                 total_mae += mae
                 
-                # rank metric
-                df = pd.DataFrame({'users':batch['anchor_user'].data.cpu(),
-                                   'items':batch['anchor_items'].data.cpu(),
-                                   'ratings':batch['exp_fdback'].data.cpu(),
-                                   'logits':rank_logits.data.cpu()})
+                # rank metric                
+                df = pd.DataFrame({'users':batch['anchor_user'].data.cpu().tolist(),
+                                   'items':batch['anchor_items'].data.cpu().tolist(),
+                                   'ratings':batch['exp_fdback'].data.cpu().tolist(),
+                                   'logits':rank_logits.data.cpu().tolist()})
                 ndcg_df = pd.concat([ndcg_df, df], axis=0)                
             
                 epoch_iterator.set_description(
                             "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
                 
         # calculate NDCG
+        items = torch.from_numpy(np.stack(ndcg_df['items'].values))
+        ratings = torch.from_numpy(np.stack(ndcg_df['ratings'].values))
+        logits = torch.from_numpy(np.stack(ndcg_df['logits'].values))
+        new_k = []
+        ndcg = []
+        for i in range(items.size(0)):
+            k = min((items[i]!=0).sum().item(),10)
+            _,ideal_idx = torch.topk(ratings[i],k)
+            ideal_items = torch.gather(items[i], -1, ideal_idx)
+            ideal_ratings = torch.gather(ratings[i],-1,ideal_idx)
+            # recommended topk
+            _,rec_idx = torch.topk(logits[i], k)
+            rec_items  = torch.gather(items[i],-1,rec_idx)
+            rec_ratings = torch.gather(ratings[i],-1,rec_idx)
+            # mask
+            rowA = rec_items.unsqueeze(1)
+            rowB = ideal_items.unsqueeze(0)
+            mask = (rowA==rowB).any(dim=1)
+            rec_ratings *= mask
+            # dcg/idcg/ndcg
+            discount = torch.log2(torch.arange(k)+2)
+            dcg = torch.sum(rec_ratings/discount, dim=-1)
+            idcg = torch.sum(ideal_ratings/discount, dim=-1)
+            ndcg.append((dcg/(idcg+1e-10)).item())
+            new_k.append(k)
         
-        # ideal topk
-        _,ideal_idx = torch.topk(ndcg_df['ratings'].values,10)
-        ideal_items = torch.gather(ndcg_df['items'].values,-1,ideal_idx)
-        ideal_ratings = torch.gather(ndcg_df['ratings'].values,-1,ideal_idx)
-        # recommended topk
-        _,rec_idx = torch.topk(ndcg_df['logits'].values,10)
-        rec_items  = torch.gather(ndcg_df['items'].values,-1,rec_idx)
-        rec_ratings = torch.gather(ndcg_df['ratings'].values,-1,rec_idx)
-        # ideal items에 있는지 확인
-        rec_mask = torch.stack([torch.where(torch.isin(rec_items[i], ideal_items[i]), torch.tensor(1), torch.tensor(0)) for i in range(rec_items.size(0))])
-        rec_ratings *= rec_mask
-        # dcg/idcg/ndcg
-        discount = torch.log2(torch.arange(10)+2)
-        dcg = torch.sum(rec_ratings/discount, dim=-1)
-        idcg = torch.sum(ideal_ratings/discount, dim=-1)
-        ndcg = dcg/(idcg+1e-10)
         ndcg_df['NDCG'] = ndcg
-        # Leave Best
-        ndcg_df = ndcg_df.sort_values(by='NDCG', ascending=False).drop_duplicates(subset='users', keep='first')
-        total_ndcg = torch.mean(ndcg_df['NDCG'])
+        ndcg_df['new_k'] = new_k
+        ndcg_mean = ndcg_df.groupby('users')['NDCG'].mean()
+        total_ndcg = np.mean(ndcg_mean.values)
         print(total_ndcg)
+        # ndcg_df.to_csv('./ndcg_test.csv', index=False)
                 
         total_rmse /= (step+1)
         total_mae /= (step+1)
 
-    end.record(stream)
-    torch.cuda.synchronize()
+    if device.type=='cuda':
+        end.record(stream)
+        torch.cuda.synchronize()
 
     print("\n [Evaluation Results]")
     print("RMSE: %2.5f" % total_rmse)
@@ -435,7 +458,8 @@ def eval2(model, ds_iter):
     
 def get_args():
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
-    parser.add_argument("--mode", type = str, default="train",
+    parser.add_argument("--device", type=str, default='single')
+    parser.add_argument("--eval", type = bool, default=False,
                         help="train eval")
     parser.add_argument("--checkpoint", type = str, default="test",
                         help="load ./checkpoints/model_name.model to evaluation")
@@ -446,7 +470,7 @@ def get_args():
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
     parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
-    parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
@@ -599,13 +623,10 @@ def main():
 
     pynvml.nvmlShutdown()
 
-    if device=='cpu': 
-        raise DeviceError
-    # tmp
-    elif torch.cuda.device_count()>1:
-        device = torch.device('cuda:2')
+    if args.device=='cpu':
+        device = torch.device(args.device)
     else:
-        device = torch.device('cuda:0')
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
     print(f"GPU index: {device.index}")
     print("\n")
@@ -635,11 +656,11 @@ def main():
     ### TensorBoard writer preparation ###
     writer = SummaryWriter(os.path.join(log_dir,f"{args.name}.tensorboard"))
     ### train ###
-    if args.mode == 'train':
+    if not args.eval:
         train(model, optimizer, lr_scheduler, ds_iter, training_config, writer)
 
     # Since train logging is done by TensorBoard, log only test result.
-    log_path = os.path.join(log_dir,'{}.{}.log'.format(args.mode, args.name))
+    log_path = os.path.join(log_dir,'{}.log'.format(args.name))
     redirect_stdout(open(log_path, 'w'))
 
     ### eval ###
