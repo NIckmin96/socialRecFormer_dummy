@@ -438,7 +438,7 @@ def eval2(model, ds_iter):
         ndcg_mean = ndcg_df.groupby('users')['NDCG'].mean()
         total_ndcg = np.mean(ndcg_mean.values)
         print(total_ndcg)
-        # ndcg_df.to_csv('./ndcg_test.csv', index=False)
+        ndcg_df.to_csv(f'./ndcg_test_{args.dataset}.csv', index=False)
                 
         total_rmse /= (step+1)
         total_mae /= (step+1)
@@ -486,7 +486,7 @@ def get_args():
     return args
 
 def main():
-    global device
+    global device, args
 
     args = get_args()
 

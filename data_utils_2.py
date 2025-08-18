@@ -29,8 +29,6 @@ from data_preprocess import prepare_org_data
 
 # 최초 한번만 실행
 def mat_to_csv(data_path:str, regenerate=False):
-    # rating_df : user-item interaction data
-    # trust_df : user간의 Social interaction을 나타내는 데이터
     rating_path = os.path.join(data_path,'rating.csv')
     trust_path = os.path.join(data_path,'trustnetwork.csv')
     if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (not regenerate):
