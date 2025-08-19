@@ -53,28 +53,19 @@ class Encoder(nn.Module):
         )
     
     def forward(self, batched_data):
-        # Input Encoding : Node id encoding + Degree encoding
-            # [batch_size, seq_length, d_model]
-        x = self.input_embed(batched_data)
+        x = self.input_embed(batched_data['user_seq'], batched_data['user_degree'])
 
         # Generate mask for padded data
         src_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
-
-        # Spatial Encoding [TODO] attn_bias 만드는 과정에서 불필요한 permutation 제거
-            # [batch_size, seq_length, seq_length, num_heads] ==> [batch_size, num_heads, seq_length, seq_length]
-        # attn_bias = self.spatial_pos_bias(batched_data).permute(0, 3, 2, 1)
         attn_bias = self.spatial_pos_bias(batched_data)
 
-        ### Ablation study: No attn_bias
-        #attn_bias = None
-        ###
         losses = []
         # Encoder layer forward pass (MHA, FFN)
         for layer in self.enc_layers:
             x, spd_loss = layer(x, src_mask, attn_bias)
+            # x, spd_loss = layer(x, src_mask, None)
             losses.append(spd_loss)
 
         del src_mask, attn_bias
-        # x: [batch_size, seq_length, d_model]
-            # src_mask will be used in encoder-decoder cross attention.
-        return x, sum(losses)/len(losses)
+        
+        return x, sum(losses)/len(losses), self.input_embed

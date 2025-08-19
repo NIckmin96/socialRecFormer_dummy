@@ -13,7 +13,8 @@ class ScaledDotProductAttention(nn.Module):
         if is_enc:
             self.spd_param = nn.Parameter(torch.randn((30, 30), dtype=torch.float, requires_grad=True))
     
-    def forward(self, Q, K, V, mask=None, attn_bias=None, last_layer_flag=False, is_dec_layer=False):
+    def forward(self, Q, K, V, mask=None, attn_bias=None, last_layer_flag=False, is_dec_layer=False, is_rating=True):
+        rating_pred = None
         # Input is 4-d tensor
         batch_size, head, length, d_tensor = K.size()
 
@@ -28,35 +29,26 @@ class ScaledDotProductAttention(nn.Module):
 
         # 3. Apply attention bias (spatial encoding)
         loss = 0
+        
+        ######################################################## [ORG] ########################################################
         if attn_bias is not None:
             # score += attn_bias
             if is_dec_layer: 
-                # [FIXME] implicit rating에 대해서 1/0을 예측하고 학습 -> mae가 아니라 bce loss가 적절하지 않나
-                # [FIXME] 하지만, 현재는 1/0에 대한 확률을 ouptut으로 계산하는 것이 아니라, 값 자체를 계산하고 있음
-                # [FIXME] Implicit rating을 기준으로 학습을 진행할거라면, 수정하는 것이 좋아보임
-                
-                #loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*30*200)
-                # attn_bias = torch.where(attn_bias == 0, -1, 1) # attn bias = rating(implicit)
-                # loss = torch.mean(torch.abs((torch.sign(score.float()) - torch.sign(attn_bias.float())))) # (batch_size*head*30*200)
-                
-                # [ORG]
-                # loss = torch.mean(torch.abs((score.float() - attn_bias.float()))) / (batch_size*head*len_a*len_b)
-                
-                # [DEV] : ranking task를 위한 new decoder loss
-                # loss = F.binary_cross_entropy_with_logits(score.float(), attn_bias.float()) / (batch_size*head*len_a*len_b)
-                loss = F.binary_cross_entropy_with_logits(torch.mean(score.float(), dim=1), torch.mean(attn_bias.float(), dim=1)) / (batch_size*len_a*len_b) # dev
+                if is_rating:
+                    # Rating loss(RMSE)
+                    loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float(), reduction='mean'))
+                else:
+                    # Ranking loss(BCE)
+                    loss = F.binary_cross_entropy_with_logits(score.squeeze(-1).float(), attn_bias.float(), reduction='mean')
     
             else:
                 # encoder loss(attn_bias : user간의 distance / encoder attention score vs attn_bias)
-                attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double()) # attn_bias = spd(user distance)
-                # loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
-                loss = torch.sqrt(F.mse_loss(torch.mean(score.float(), dim=1), torch.mean(attn_bias.float(), dim=1))) / (batch_size*length*length)
+                attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double())
+                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float(), reduction='mean')) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
                 
-
         ### Decoder 마지막 layer에서 Q * K.T(score)의 Head를 기준으로한 mean값을 Return
         if last_layer_flag:
-            score = torch.mean(score, dim=1)
-            return score, loss
+            rating_pred = torch.mean(score, dim=1)
 
         # 3. Pass score to softmax for making [0, 1] range.
         score = torch.softmax(score, dim=-1)
@@ -64,19 +56,20 @@ class ScaledDotProductAttention(nn.Module):
         # 4. Dot product with V
         V = torch.matmul(score, V)
         
-        return V, loss
+        return V, loss, rating_pred
 
 class MultiHeadAttention(nn.Module):
     """
     Perform multi-head attention
     """
-    def __init__(self, d_model, num_heads, last_layer_flag=False, is_dec_layer=False):
+    def __init__(self, d_model, num_heads, last_layer_flag=False, is_dec_layer=False, is_rating=True):
         super(MultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
         self.attention = ScaledDotProductAttention(not is_dec_layer)
         self.last_layer_flag = last_layer_flag
         self.is_dec_layer = is_dec_layer
+        self.is_rating = is_rating
 
         # Input projection
         self.W_Q = nn.Linear(d_model, d_model)
@@ -96,21 +89,17 @@ class MultiHeadAttention(nn.Module):
         # Apply mask for multi-head attention
         if mask is not None:
             mask = mask.unsqueeze(1).repeat(1, self.num_heads, 1, 1)
-
-        ####### Decoder의 마지막 layer (cross-attn)는 rating prediction을 수행
-        if not self.last_layer_flag:
-            # 3. Perform scaled-dot product attention
-            out, loss = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer)
-        else:
-            out, loss = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer)
-            return out, loss
-        #######
-
+            
+        out, loss, rating_pred = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer, self.is_rating)
+        
         # 4. Concat and pass to linear layer
         out = self.concat(out)
         out = self.W_concat(out)
 
-        return out, loss
+        if self.last_layer_flag:
+            return out, loss, rating_pred
+        else:
+            return out, loss
     
     def split(self, tensor):
         """
