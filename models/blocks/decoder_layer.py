@@ -42,7 +42,12 @@ class DecoderLayer(nn.Module):
         
             
         # Cross Attention(2) : anchor user - item sequences 간의 aggregation
+        self.x_lin = nn.Linear(d_model, d_model//2)
+        self.anchor_i_lin = nn.Linear(d_model, d_model//2)
         self.norm_cross2 = nn.LayerNorm(d_model)
+        self.enc_lin = nn.Linear(d_model, d_model//2)
+        self.anchor_u_lin = nn.Linear(d_model, d_model//2)
+        
         self.cross_attention2 = MultiHeadAttention(d_model=d_model, num_heads=num_heads, is_dec_layer=self.dec_layer, is_rating=False)
         self.dropout_cross2 = nn.Dropout(p=dropout)
         self.act_cross2 = nn.LeakyReLU()
@@ -87,9 +92,16 @@ class DecoderLayer(nn.Module):
         
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
         residual = x
-        x = x + x_anchor_i # [TODO] Concatenation으로 변경해서 실험
+        x = self.x_lin(x)
+        x_anchor_i = self.anchor_i_lin(x_anchor_i)
+        x = torch.cat((x, x_anchor_i), dim=-1)
+        # x = x + x_anchor_i # [TODO] Concatenation으로 변경해서 실험
+        
         x = self.norm_cross2(x)
-        new_enc_output = enc_output + x_anchor.expand(-1,enc_output.size(1),-1) # [TODO] Concatenation으로 변경해서 실험
+        x_anchor = self.anchor_u_lin(x_anchor)
+        enc_output = self.enc_lin(enc_output)
+        new_enc_output = torch.cat((enc_output, x_anchor.expand(*enc_output.size())), dim=-1)
+        # new_enc_output = enc_output + x_anchor.expand(-1,enc_output.size(1),-1) # [TODO] Concatenation으로 변경해서 실험
         x, _ = self.cross_attention2(Q=x, K=new_enc_output, V=new_enc_output, mask=cross_attn_mask_2, attn_bias=None)
         # # Ranking loss(BCE)
         # bce_loss = F.binary_cross_entropy_with_logits(torch.mean(x, dim=-1).float(), ranking_bias.float(), reduction='mean')
