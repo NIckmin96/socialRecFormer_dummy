@@ -190,9 +190,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
             # compute loss
             mask = (batch['item_rating'] != 0)
-            org_loss = MSE(rating_pred, batch['item_rating'], mask)
+            org_loss = RMSE(rating_pred, batch['item_rating'], mask)
             y_rank_value = F.softmax(batch['exp_fdback'].float(), dim=-1)
-            rank_loss = MSE(rank_logits, y_rank_value)
+            rank_loss = RMSE(rank_logits, y_rank_value)
             loss = org_loss + rank_loss
             # loss = org_loss
             loss.backward()
