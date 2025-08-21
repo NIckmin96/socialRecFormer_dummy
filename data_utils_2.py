@@ -222,10 +222,16 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
     rating_users = rating_split.user_id.unique()
     user_counts = rating_split['user_id'].value_counts()
-    user_median = user_counts.median()
+    # per_user = user_counts.median()
+    per_user = user_counts.quantile(0.25)
+    print("per user : ", per_user)
+    # 75% 실험
+    if data_path.split('/')[-1] in ['yelp']:
+        per_user = min(user_counts.quantile(0.1),2)
     anchor_nodes = []
     for user,cnt in user_counts.items():
-        k = int(min(user_median, cnt))
+        # k = int(min(user_median, cnt))
+        k = int(min(per_user, cnt))
         anchor_nodes.extend([user]*k)
         
     # Data augmentation -> node 복제
@@ -266,7 +272,7 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
         print(f"{split} random walk sequence file doesn't exist!")
         print(f"Creating {split} random walk sequence...")
         for node in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
-            if anchor_cnt[node]==user_median:
+            if anchor_cnt[node]==per_user:
                 continue
             while True:
                 seqs = [node]
