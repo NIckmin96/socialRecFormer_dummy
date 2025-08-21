@@ -191,11 +191,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
             # compute loss
             mask = (batch['item_rating'] != 0)
-            org_loss = RMSE(rating_pred, batch['item_rating'], mask)
+            org_loss = MSE(rating_pred, batch['item_rating'], mask)
             y_rank_value = F.softmax(batch['exp_fdback'].float(), dim=-1)
             # rank_loss = RMSE(rank_logits, y_rank_value)
             rank_loss = CE(rank_logits, y_rank_value)
             loss = org_loss + rank_loss
+            # loss = org_loss
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -238,122 +239,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("total memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
     print(torch.cuda.memory_summary(device=device.index))
-
-
-# def eval(model, ds_iter):
-
-#     eval_losses = AverageMeter()
-#     model.eval()
-
-#     if device.type=='cuda':
-#         start = torch.cuda.Event(enable_timing=True)
-#         end = torch.cuda.Event(enable_timing=True)
-#         stream = torch.cuda.current_stream(device=device)
-#         start.record(stream)
-        
-#     with torch.no_grad():
-#         epoch_iterator = tqdm(ds_iter['test'],
-#                         desc="Validating (X / X Steps) (loss=X.X)",
-#                         bar_format="{l_bar}{r_bar}",
-#                         dynamic_ncols=True,
-#                         leave=False)
-
-#         pred, trg, msk = [], [], []
-#         total_precision_5, total_precision_10 = 0.0, 0.0
-#         total_recall_5, total_recall_10 = 0.0, 0.0
-#         total_ndcg_5, total_ndcg_10 = 0.0, 0.0
-        
-#         # NDCG : user별 중복 계산(input이 다르므로, 다른 결과 발생) -> 1. 그 중에서 best를 선택하는 코드
-#         ndcg_dict = dict()
-        
-#         for step, batch in enumerate(epoch_iterator):
-            
-#             # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-#             batch['user_seq'] = batch['user_seq'].to(device)
-#             batch['user_degree'] = batch['user_degree'].to(device)
-#             batch['item_list'] = batch['item_list'].to(device)
-#             batch['item_degree'] = batch['item_degree'].to(device)
-#             batch['item_rating'] = batch['item_rating'].to(device)
-#             # batch['spd_matrix'] = batch['spd_matrix'].to(device)
-#             ##################### [DEV] #####################
-#             batch['anchor_user'] = batch['anchor_user'].to(device)
-#             batch['anchor_degree'] = batch['anchor_degree'].to(device)
-#             batch['anchor_items'] = batch['anchor_items'].to(device)
-#             batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
-#             batch['imp_fdback'] = batch['imp_fdback'].to(device)
-#             batch['exp_fdback'] = batch['exp_fdback'].to(device)
-            
-#             rank_logits, rating_pred, enc_loss, dec_rmse = model(batch, is_train=False)
-#             mask = (batch['item_rating'] != 0)
-            
-#             loss = RMSE(rating_pred, batch['item_rating'], mask)
-#             eval_losses.update(loss)
-            
-#             pred.append(rating_pred)
-#             trg.append(batch['item_rating'])
-#             msk.append(mask)
-            
-#             # Rank Valid Result
-#             rank_eval_5 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=5)
-#             precision_5 = rank_eval_5.precision()
-#             recall_5 = rank_eval_5.recall()
-#             ndcg_5 = rank_eval_5.NDCG()
-            
-#             total_precision_5 += precision_5
-#             total_recall_5 += recall_5
-#             total_ndcg_5 += ndcg_5
-            
-            
-#             rank_eval_10 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=10)
-#             precision_10 = rank_eval_10.precision()
-#             recall_10 = rank_eval_10.recall()
-#             ndcg_10 = rank_eval_10.NDCG()
-            
-#             ndcg2_10 = rank_eval_10.NDCG2()
-#             for u,n in zip(batch['anchor_user'], ndcg2_10.squeeze()):
-#                 if n.item() > ndcg_dict.get(u.item(),0):
-#                     ndcg_dict[u.item()] = n.item()
-#                 else:
-#                     ndcg_dict[u.item()] = ndcg_dict.get(u,0)
-            
-#             total_precision_10 += precision_10
-#             total_recall_10 += recall_10
-#             total_ndcg_10 += ndcg_10
-
-#             epoch_iterator.set_description(
-#                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
-#         pred = torch.cat(pred)
-#         trg = torch.cat(trg)
-#         msk = torch.cat(msk)
-#         print(pred[msk])
-#         print(trg[msk])
-#         total_rmse = RMSE(pred, trg, msk)
-#         total_mae = MAE(pred, trg, msk)
-        
-#         total_ndcg_5 /= (step+1)
-#         total_recall_5 /= (step+1)
-#         total_precision_5 /= (step+1)
-#         total_ndcg_10 /= (step+1)
-#         total_recall_10 /= (step+1)
-#         total_precision_10 /= (step+1)
-        
-#         print(len(ndcg_dict.values()))
-#         total_ndcg2_10 = np.mean(list(ndcg_dict.values()))
-#         print(f"ndcg2@10 : {total_ndcg2_10}")
-
-#     if device.type=='cuda':
-#         end.record(stream)
-#         torch.cuda.synchronize()
-
-#     print("\n [Evaluation Results]")
-#     print("Loss: %2.5f" % eval_losses.avg)
-#     print("RMSE: %2.5f" % total_rmse)
-#     print("MAE: %2.5f" % total_mae)
-#     print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
-#     print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
-#     print(f"total eval time: {(start.elapsed_time(end))}")
-#     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
-#     print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
     
 def eval2(model, ds_iter):
     model.eval()

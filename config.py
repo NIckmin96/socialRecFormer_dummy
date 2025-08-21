@@ -27,7 +27,7 @@ ciao={
             "learning_rate":0.01,
             "warmup":40, 
             "lr_decay":"linear",
-            "weight_decay":1e-1,
+            "weight_decay":1e-3,
             "num_epochs":100,
             "patience":10, 
             "alpha":1,
@@ -66,7 +66,7 @@ ciao_timestamp={
             "learning_rate":0.01,
             "warmup":40, 
             "lr_decay":"linear",
-            "weight_decay":1e-1,
+            "weight_decay":1e-3,
             "num_epochs":100,
             "patience":10, 
             "alpha":1,
@@ -104,7 +104,7 @@ epinions={
             "learning_rate":0.01,
             "warmup":80, 
             "lr_decay":"cos",
-            "weight_decay":1e-1,
+            "weight_decay":1e-2,
             "eval_frequency":400, 
             "num_epochs":100,
             "num_eval_steps":849,   # total_valid_sample / total_epoch
@@ -159,7 +159,7 @@ douban={
             "max_user_degree": 4118,
             "max_item_degree": 717,
             "max_spd_value": 15,
-            "d_model": 48,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
