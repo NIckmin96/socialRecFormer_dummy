@@ -101,6 +101,9 @@ def RMSE(pred, y, mask=None):
 
     return torch.sqrt(MSE(pred, y, mask))
 
+def CE(pred, y):
+    return -(y*pred.log()).sum(dim=1).mean()
+
 class RankMetric:
     def __init__(self, items, implicit, explicit, logits, k):
         self.k=k
@@ -153,15 +156,18 @@ class RankMetric:
 
         return NDCG
     
-    def NDCG2(self):
-        eps = 1e-10
-        discount = torch.log2(torch.arange(self.k)+2).to(self.device)
-        DCG = torch.sum(self.recommended_k_rating/discount, dim=-1)
-        IDCG = torch.sum(self.ideal_k_rating/discount, dim=-1)
-        NDCG = DCG/(IDCG+eps)
-        NDCG = NDCG/(torch.sum(self.mask, dim=-1)+eps)
+    # def NDCG2(self):
+    #     eps = 1e-10
+    #     discount = torch.log2(torch.arange(self.k)+2).to(self.device)
+    #     DCG = torch.sum(self.recommended_k_rating/discount, dim=-1)
+    #     IDCG = torch.sum(self.ideal_k_rating/discount, dim=-1)
+    #     NDCG = DCG/(IDCG+eps)
+    #     NDCG = NDCG/(torch.sum(self.mask, dim=-1)+eps)
         
-        return NDCG
+    #     return NDCG
+    
+    def BPR(self):
+        pass
 
     def precision(self):
         total_precision = 0.0
