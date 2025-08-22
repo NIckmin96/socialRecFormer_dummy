@@ -357,17 +357,12 @@ def get_args():
     parser.add_argument('--num_layers_dec', type=int, default=5, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
-    parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
     parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
-    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
-    parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
-    parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
-    parser.add_argument('--train_augs', type=int, default=1, help="how many times augment train data per anchor user")    
-    parser.add_argument('--test_augs', type=bool, default=True, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
-    parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
+    parser.add_argument('--seq_len', type=int, default=200, help="user random walk sequence length")
+    parser.add_argument('--regen', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
     args = parser.parse_args()
@@ -388,7 +383,7 @@ def main():
 
 
     # regenerate 여부 확인
-    if args.regenerate:
+    if args.regen:
         print("Re-Creating Datatset...")
     else:
         print("Loading Datatset...")
@@ -477,24 +472,6 @@ def main():
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
-
-    # 1. file path check(train_augs & test_augs)
-    train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
-    if args.test_augs:
-        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}\n \
-            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
-        valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_valid_{args.train_augs}times.pkl')
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
-    else:
-        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n \
-            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
-        valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_valid.pkl')
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test.pkl')
 
     # gpu device선택
     device_ids = list(range(torch.cuda.device_count()))

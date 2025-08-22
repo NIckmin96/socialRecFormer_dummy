@@ -39,27 +39,18 @@ class DatasetMaking:
         self.user_item_table_test = utils.generate_interacted_items_table(data_path, self.rating_test, self.item_degree_test, split='test', seed=args.seed, regen=args.regen)
 
         # Random Walk Sequence 생성
-        self.random_walk_test, rw_test_path, used_set = utils.generate_social_random_walk_sequence(data_path, self.rating_test, self.social_test, self.user_degree_test, self.item_degree_test, walk_length=args.seq_len, data_split_seed=args.seed, split='test', regen=args.regen, used_set=None)
-        self.random_walk_valid, rw_valid_path, used_set = utils.generate_social_random_walk_sequence(data_path, self.rating_valid, self.social_valid, self.user_degree_valid, self.item_degree_valid, walk_length=args.user_seq_len, data_split_seed=args.seed, split='valid', regen=args.regen, used_set=used_set)
-        self.random_walk_train, rw_train_path, _ = utils.generate_social_random_walk_sequence(data_path, self.rating_train, self.social_train, self.user_degree_train, self.item_degree_train, walk_length=args.user_seq_len, data_split_seed=args.seed, split='train', regen=args.regen, used_set=used_set)
+        self.random_walk_test, rw_test_path, used_set = utils.generate_rw_sequence(data_path, self.rating_test, self.user_degree_test, self.item_degree_test, walk_length=args.seq_len, data_split_seed=args.seed, split='test', regen=args.regen, used_set=set())
+        self.random_walk_valid, rw_valid_path, used_set = utils.generate_rw_sequence(data_path, self.rating_valid, self.user_degree_valid, self.item_degree_valid, walk_length=args.seq_len, data_split_seed=args.seed, split='valid', regen=args.regen, used_set=used_set)
+        self.random_walk_train, rw_train_path, _ = utils.generate_rw_sequence(data_path, self.rating_train, self.user_degree_train, self.item_degree_train, walk_length=args.seq_len, data_split_seed=args.seed, split='train', regen=args.regen, used_set=used_set)
 
         # Random Walk Sequence 중복 제거 + train/test에서 겹치는 경우 train에서 제거
-        self.random_walk_train, self.random_walk_valid, self.random_walk_test = utils.remove_duplicated_social_random_walk_sequence(self.random_walk_train, self.random_walk_valid, self.random_walk_test, rw_train_path, rw_valid_path, rw_test_path, args.regen)
+        self.random_walk_train, self.random_walk_valid, self.random_walk_test = utils.remove_duplicated_random_walk_sequence(self.random_walk_train, self.random_walk_valid, self.random_walk_test, rw_train_path, rw_valid_path, rw_test_path, args.regen)
         
         # 모델 입력을 위한 최종 데이터셋 구성(rating)
-        self.total_test, self.test_user_item = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_test, item_df=self.user_item_table_test,
-                                                                                    seed=args.seed, split='test', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user,
-                                                                                    return_params=args.return_params, train_augs=args.train_augs, test_augs=args.test_augs, regen=args.regen)
+        self.total_test = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_test, item_df=self.user_item_table_test, seed=args.seed, split='test', random_walk_len=args.seq_len, regen=args.regen)
         
-        self.total_valid, self.valid_user_item = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_valid, item_df=self.user_item_table_valid,
-                                                                                    seed=args.seed, split='valid', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user,
-                                                                                    return_params=args.return_params, train_augs=args.train_augs, test_augs=args.test_augs, regen=args.regen)
-        
-        self.user_item_dic = utils.union_user_item_dict(self.test_user_item, self.valid_user_item)
+        self.total_valid = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_valid, item_df=self.user_item_table_valid, seed=args.seed, split='valid', random_walk_len=args.seq_len, regen=args.regen)
 
-        self.total_train = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_train, item_df=self.user_item_table_train,
-                                                                seed=args.seed, split='train', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user,
-                                                                 return_params=args.return_params, train_augs=args.train_augs, test_augs=args.test_augs, rating_thres=args.rating_thres,
-                                                                  regen=args.regen, test_user_item=self.user_item_dic)
+        self.total_train = utils.generate_input_sequence_data(data_path=data_path, user_df=self.random_walk_train, item_df=self.user_item_table_train, seed=args.seed, split='train', random_walk_len=args.seq_len, regen=args.regen)
         
         

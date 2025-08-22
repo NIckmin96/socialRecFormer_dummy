@@ -9,6 +9,9 @@ class MyDataset(Dataset):
     
     def __init__(self, dataframe):
         # [DEV]
+        self.rw_sequence = torch.tensor(dataframe['rw_sequence'], dtype=torch.long)
+        self.degree = torch.tensor(dataframe['degree'], dtype=torch.long)
+        
         self.anchor_user = torch.tensor(dataframe['user_id'], dtype=torch.long)
         self.anchor_degree = torch.tensor(dataframe['anchor_degree'], dtype=torch.long)
         self.anchor_items = torch.tensor(dataframe['anchor_items'].tolist(), dtype=torch.long)        
