@@ -53,7 +53,7 @@ class DecoderLayer(nn.Module):
         # prediction layer
         self.last_attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, last_layer_flag=True, is_dec_layer=self.dec_layer, is_rating=True)
 
-    def forward(self, x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias):
+    def forward(self, x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias):
         # tmp
         rmse_loss = 0
         rating_pred = None

@@ -2,19 +2,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils import CE
 from models.encoder import Encoder
-from models.decoder import Decoder
+from models.layers.encoding_modules import Embedding
 
 class Transformer(nn.Module):
     # def __init__(self, num_user, max_degree_user, num_item, max_degree_item, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec):
-    def __init__(self, num_user, max_user_degree, max_spd_value, num_item, max_item_degree, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec, n_experts, topk, rating_thres, args):
+    def __init__(self, seq_len, max_node, max_degree, d_model, d_ffn, num_heads, dropout, num_layers_enc, n_experts, topk):
         super(Transformer, self).__init__()
-
+        
+        self.input_embed = Embedding(
+            max_node = max_node,
+            max_degree = max_degree,
+            d_model = d_model
+        )
 
         self.encoder = Encoder(
-            num_user=num_user,
-            max_degree=max_user_degree,
-            max_spd_value=max_spd_value,
+            input_embed=self.input_embed,
             d_model=d_model,
             d_ffn=d_ffn,
             num_heads=num_heads,
@@ -23,28 +27,23 @@ class Transformer(nn.Module):
             n_experts=n_experts,
             topk=topk
         )
-
-        self.decoder = Decoder(
-            num_user=num_user,
-            num_item=num_item,
-            max_user_degree=max_user_degree,
-            max_item_degree=max_item_degree,
-            d_model=d_model,
-            d_ffn=d_ffn,
-            num_heads=num_heads,
-            dropout=dropout,
-            num_layers=num_layers_dec,
-            n_experts=n_experts,
-            topk=topk,
-            rating_thres=rating_thres,
-            args=args
-        )
+        
+        self.x_linear = nn.Linear(2*d_model, d_model)
+        self.linear = nn.Linear(seq_len, 1)
     
-    def forward(self, batched_data, is_train=True):
-        enc_output, enc_loss, user_embed = self.encoder(batched_data)
-        # print(f"############### Enc end... {enc_output.shape} and {src_mask.shape} ###############")
-        rank_logits, rating_pred, rmse_loss = self.decoder(batched_data, enc_output, user_embed, is_train)
-
-        # [batch_size, seq_leng_item, seq_len_user]
-        # ==> [batch_size, seq_len_user, seq_len_item]
-        return rank_logits, rating_pred.permute(0, 2, 1), enc_loss, rmse_loss
+    def forward(self, batch1, batch2):
+        attn_output = self.encoder(batch1) # bs x n x d
+        mask = (batch2['product']!=0) # bs x i
+        # print(batch2['user'].max(), batch2['user_degree'].max())
+        item_embed = self.input_embed(batch2['product'], batch2['product_degree']) # bs x i x d
+        user_embed = self.input_embed(batch2['user'], batch2['user_degree']).expand(*item_embed.size()) # bs x i x d
+        x = torch.cat([user_embed, item_embed], dim=-1)
+        x = self.x_linear(x) # bs x i x d
+        x = torch.matmul(x, attn_output.transpose(-1,-2)) # bs x i x n
+        x = self.linear(x).squeeze(-1) # bs x i
+        # CE loss
+        target = F.softmax(batch2['ratings'].float(), dim=-1)*mask # bs x i
+        logits = F.softmax(x, dim=-1)*mask
+        loss = CE(logits, target)
+        
+        return loss, target, logits

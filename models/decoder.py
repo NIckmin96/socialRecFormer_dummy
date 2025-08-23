@@ -43,8 +43,6 @@ class Decoder(nn.Module):
         # Rating embedding vector 생성
         self.rating_embed = RatingEncoder(num_user, len_item_seq, d_model)
         # Ranking attention bias(cross-attn1에 사용)
-        self.ranking_bias = RankBias(rating_thres=rating_thres)
-        # Rating attention bias(cross-attn2에 사용)
         self.rating_bias = RatingBias(num_heads=num_heads)
 
         self.dec_layers = nn.ModuleList(
@@ -92,11 +90,11 @@ class Decoder(nn.Module):
         rmse_losses = []
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
-            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
+            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias)
             rmse_losses.append(rmse_loss)
         
         # Pass to prediction layer
-        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
+        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias)
         rmse_losses.append(rmse_loss)
         
         # [bs, i, d] => [bs, i]
