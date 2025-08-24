@@ -11,11 +11,14 @@ import pynvml
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
+from collections import defaultdict
+
 import torch
 import torch.nn.functional as F
 # import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.tensorboard import SummaryWriter
 
 import data_making_2 as dm
@@ -24,11 +27,6 @@ from config import Config
 from dataset import MyDataset
 from models.transformer import Transformer
 from scheduler import WarmupCosineSchedule
-
-# Ray Tune
-from ray import tune
-from ray.tune.schedulers import ASHAScheduler
-from ray.tune.search.optuna import OptunaSearch
 
 logger = logging.getLogger(__name__)
 
@@ -52,85 +50,103 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+        
+# calculate NDCG(row별로 계산 : 알고리즘은 동일)
+def NDCG(items, logits, ratings):
+    items = torch.tensor(items)
+    logits = torch.tensor(logits)
+    ratings = torch.tensor(ratings)
+    k = min((items!=0).sum().item(), 10)
+    # ideal
+    _,ideal_idx = torch.topk(ratings, k)
+    ideal_items = torch.gather(items, -1, ideal_idx)
+    ideal_ratings = torch.gather(ratings, -1, ideal_idx)
+    # recommended
+    _,rec_idx = torch.topk(logits, k)
+    rec_items  = torch.gather(items,-1,rec_idx)
+    rec_ratings = torch.gather(ratings,-1,rec_idx)
+    # mask (ideal에 존재하는지 여부)
+    rowA = rec_items.unsqueeze(1)
+    rowB = ideal_items.unsqueeze(0)
+    mask = (rowA==rowB).any(dim=1)
+    rec_ratings *= mask
+    # dcg/idcg/ndcg
+    discount = torch.log2(torch.arange(k)+2)
+    dcg = torch.sum(rec_ratings/discount, dim=-1)
+    idcg = torch.sum(ideal_ratings/discount, dim=-1)
+    ndcg = dcg/(idcg+1e-10).item()
+    
+    return ndcg
 
 def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_mae, best_ndcg, update_cnt):
     eval_losses = AverageMeter()
-    org_losses = AverageMeter()
-    dec_losses = AverageMeter()
     model.eval()
+    
+    total_rmse, total_mae = 0.0, 0.0
+    output_df = pd.DataFrame()
     with torch.no_grad():
-        # FIXME: valid를 기준으로 저장 X, test를 기준으로 바로 저장. 
-        epoch_iterator = tqdm(ds_iter['valid'],
-                              desc="Validating (X / X Steps) (loss=X.X)",
-                              bar_format="{l_bar}{r_bar}",
-                              dynamic_ncols=True,
-                              leave=False)
-        pred, trg, msk = [], [], []
-        precision_5, recall_5, ndcg_5 = .0, .0, .0
-        precision_10, recall_10, ndcg_10 = .0, .0, .0
-        for step, batch in enumerate(epoch_iterator):
-            batch['user_seq'] = batch['user_seq'].to(device)
-            batch['user_degree'] = batch['user_degree'].to(device)
-            batch['item_list'] = batch['item_list'].to(device)
-            batch['item_degree'] = batch['item_degree'].to(device)
-            batch['item_rating'] = batch['item_rating'].to(device)
-            # batch['spd_matrix'] = batch['spd_matrix'].to(device)
-            ##################### [DEV] #####################
-            batch['anchor_user'] = batch['anchor_user'].to(device)
-            batch['anchor_degree'] = batch['anchor_degree'].to(device)
-            batch['anchor_items'] = batch['anchor_items'].to(device)
-            batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
-            batch['imp_fdback'] = batch['imp_fdback'].to(device)
-            batch['exp_fdback'] = batch['exp_fdback'].to(device)
-
-            rank_logits, rating_pred, enc_loss, dec_rmse = model(batch, is_train=False)
-            # rmse loss 계산(Rating)
+        epoch_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        for step, batch in enumerate(epoch_iterator):     
+            batch = {k:v.to(device) for k,v in batch.items()}
+            
+            rank_output, rating_pred, _, _ = model(batch, is_train=False)
             mask = (batch['item_rating'] != 0)
-            org_loss = RMSE(rating_pred, batch['item_rating'], mask)
-            loss = org_loss
+            rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
+            y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
+            rmse += RMSE(rank_output, y_rank_value)
+            mae = MAE(rating_pred, batch['item_rating'], mask)
             
-            eval_losses.update(loss)
-            org_losses.update(org_loss)
+            total_rmse += rmse
+            total_mae += mae
+            eval_losses.update(rmse)
             
-            pred.append(rating_pred)
-            trg.append(batch['item_rating'])
-            msk.append(mask)
-
-            # Rank Valid Result
-            rank_eval_10 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=10)
-            precision_10 += rank_eval_10.precision()
-            recall_10 += rank_eval_10.recall()
-            ndcg_10 += rank_eval_10.NDCG()
-
             epoch_iterator.set_description(
-                        "Validating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), loss))
-        
-        # Rating Valid Result
-        pred = torch.cat(pred)
-        trg = torch.cat(trg)
-        msk = torch.cat(msk)
-        
-        total_rmse = RMSE(pred, trg, msk)
-        total_mae = MAE(pred, trg, msk)
+                        "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
+            
+            # zero padding인 경우 제외
+            mask = (batch['anchor_items']!=0)
+            rank_output = rank_output*mask
+            
+            item_lst, rating_lst, output_lst = [],[],[]
+            for i in range(batch['anchor_user'].size(0)):
+                items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
+                outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
+                assert len(items)==len(ratings)==len(outputs)
+                item_lst.append(items)
+                rating_lst.append(ratings)
+                output_lst.append(outputs)
+            anchor_users = batch['anchor_user'].data.cpu().tolist()
+            
+            df = pd.DataFrame({'anchor_user':anchor_users,
+                               'anchor_items':item_lst,
+                               'anchor_ratings':rating_lst,
+                               'outputs':output_lst})
+            
+            output_df = pd.concat([output_df, df])
+            
+    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
+                                                          'anchor_ratings':lambda x:sum(x, start=[]),
+                                                          'outputs':lambda x:sum(x, start=[])}).reset_index()
+    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
+    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
+    output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
+    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    total_rmse /= (step+1)
+    total_mae /= (step+1)
+            
+    if ((1/total_rmse)*0.4+(total_ndcg)*0.6 > (1/best_rmse)*0.4+(best_ndcg)*0.6): 
+        best_ndcg = total_ndcg
+        best_rmse = total_rmse
+        best_mae = total_mae
+        torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
+        print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test MAE = {total_mae:.6f}, test NDCG@10 = {best_ndcg:.6f}')
+        update_cnt = 0
+    
+    else:
+        update_cnt += 1
 
-        precision_10 /= (step+1)
-        recall_10 /= (step+1)
-        ndcg_10 /= (step+1)
-        
-        print(f"Precision : {precision_10:.4f} / Recall : {recall_10:.4f} / NDCG : {ndcg_10:.4f}")
-        
-        if ((1/total_rmse)*0.4+(ndcg_10)*0.6 > (1/best_rmse)*0.4+(best_ndcg)*0.6): 
-            best_ndcg = ndcg_10
-            best_rmse = total_rmse
-            best_mae = total_mae
-            torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-            print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}, test NDCG@10 = {ndcg_10.item():.6f}')
-            update_cnt = 0
-        
-        else:
-            update_cnt += 1
-
-    return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_rmse, total_mae, update_cnt, org_losses.avg, dec_losses.avg
+    return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_ndcg, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
@@ -170,29 +186,15 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                             leave=False)
         
         for step, batch in enumerate(epoch_iterator):
-            # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-            batch['user_seq'] = batch['user_seq'].to(device)
-            batch['user_degree'] = batch['user_degree'].to(device)
-            batch['item_list'] = batch['item_list'].to(device)
-            batch['item_degree'] = batch['item_degree'].to(device)
-            batch['item_rating'] = batch['item_rating'].to(device)
-            # batch['spd_matrix'] = batch['spd_matrix'].to(device)
-            ##################### [DEV] #####################
-            batch['anchor_user'] = batch['anchor_user'].to(device)
-            batch['anchor_degree'] = batch['anchor_degree'].to(device)
-            batch['anchor_items'] = batch['anchor_items'].to(device)
-            batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
-            batch['imp_fdback'] = batch['imp_fdback'].to(device)
-            batch['exp_fdback'] = batch['exp_fdback'].to(device)
-
+            batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
-            rank_logits, rating_pred, enc_loss, dec_rmse = model(batch)
+            rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
 
-            # compute loss
-            mask = (batch['item_rating'] != 0)
-            org_loss = RMSE(rating_pred, batch['item_rating'], mask)
-            y_rank_value = F.softmax(batch['exp_fdback'].float(), dim=-1)
-            rank_loss = RMSE(rank_logits, y_rank_value)
+            rating_mask = (batch['item_rating'] != 0)            
+            org_loss = RMSE(rating_pred, batch['item_rating'], rating_mask)
+            y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
+            rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            
             loss = org_loss + rank_loss
             loss.backward()
 
@@ -211,7 +213,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             torch.cuda.synchronize()
             
         total_time += (start.elapsed_time(end))
-        valid_loss, best_rmse, best_mae, best_ndcg, valid_rmse, valid_mae, update_cnt, org_loss, dec_loss = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
 
         # Tensorboard recording
@@ -222,7 +224,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         # # Ray recording
         # tune.report({"loss":valid_loss})
 
-        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f}\n")
+        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         if epoch > 100:
             break
         if update_cnt > 15: 
@@ -235,122 +237,6 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("total memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
     print(torch.cuda.memory_summary(device=device.index))
-
-
-def eval(model, ds_iter):
-
-    eval_losses = AverageMeter()
-    model.eval()
-
-    if device.type=='cuda':
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        stream = torch.cuda.current_stream(device=device)
-        start.record(stream)
-        
-    with torch.no_grad():
-        epoch_iterator = tqdm(ds_iter['test'],
-                        desc="Validating (X / X Steps) (loss=X.X)",
-                        bar_format="{l_bar}{r_bar}",
-                        dynamic_ncols=True,
-                        leave=False)
-
-        pred, trg, msk = [], [], []
-        total_precision_5, total_precision_10 = 0.0, 0.0
-        total_recall_5, total_recall_10 = 0.0, 0.0
-        total_ndcg_5, total_ndcg_10 = 0.0, 0.0
-        
-        # NDCG : user별 중복 계산(input이 다르므로, 다른 결과 발생) -> 1. 그 중에서 best를 선택하는 코드
-        ndcg_dict = dict()
-        
-        for step, batch in enumerate(epoch_iterator):
-            
-            # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-            batch['user_seq'] = batch['user_seq'].to(device)
-            batch['user_degree'] = batch['user_degree'].to(device)
-            batch['item_list'] = batch['item_list'].to(device)
-            batch['item_degree'] = batch['item_degree'].to(device)
-            batch['item_rating'] = batch['item_rating'].to(device)
-            # batch['spd_matrix'] = batch['spd_matrix'].to(device)
-            ##################### [DEV] #####################
-            batch['anchor_user'] = batch['anchor_user'].to(device)
-            batch['anchor_degree'] = batch['anchor_degree'].to(device)
-            batch['anchor_items'] = batch['anchor_items'].to(device)
-            batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
-            batch['imp_fdback'] = batch['imp_fdback'].to(device)
-            batch['exp_fdback'] = batch['exp_fdback'].to(device)
-            
-            rank_logits, rating_pred, enc_loss, dec_rmse = model(batch, is_train=False)
-            mask = (batch['item_rating'] != 0)
-            
-            loss = RMSE(rating_pred, batch['item_rating'], mask)
-            eval_losses.update(loss)
-            
-            pred.append(rating_pred)
-            trg.append(batch['item_rating'])
-            msk.append(mask)
-            
-            # Rank Valid Result
-            rank_eval_5 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=5)
-            precision_5 = rank_eval_5.precision()
-            recall_5 = rank_eval_5.recall()
-            ndcg_5 = rank_eval_5.NDCG()
-            
-            total_precision_5 += precision_5
-            total_recall_5 += recall_5
-            total_ndcg_5 += ndcg_5
-            
-            
-            rank_eval_10 = RankMetric(batch['anchor_items'], batch['imp_fdback'], batch['exp_fdback'], rank_logits, k=10)
-            precision_10 = rank_eval_10.precision()
-            recall_10 = rank_eval_10.recall()
-            ndcg_10 = rank_eval_10.NDCG()
-            
-            ndcg2_10 = rank_eval_10.NDCG2()
-            for u,n in zip(batch['anchor_user'], ndcg2_10.squeeze()):
-                if n.item() > ndcg_dict.get(u.item(),0):
-                    ndcg_dict[u.item()] = n.item()
-                else:
-                    ndcg_dict[u.item()] = ndcg_dict.get(u,0)
-            
-            total_precision_10 += precision_10
-            total_recall_10 += recall_10
-            total_ndcg_10 += ndcg_10
-
-            epoch_iterator.set_description(
-                        "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
-        pred = torch.cat(pred)
-        trg = torch.cat(trg)
-        msk = torch.cat(msk)
-        print(pred[msk])
-        print(trg[msk])
-        total_rmse = RMSE(pred, trg, msk)
-        total_mae = MAE(pred, trg, msk)
-        
-        total_ndcg_5 /= (step+1)
-        total_recall_5 /= (step+1)
-        total_precision_5 /= (step+1)
-        total_ndcg_10 /= (step+1)
-        total_recall_10 /= (step+1)
-        total_precision_10 /= (step+1)
-        
-        print(len(ndcg_dict.values()))
-        total_ndcg2_10 = np.mean(list(ndcg_dict.values()))
-        print(f"ndcg2@10 : {total_ndcg2_10}")
-
-    if device.type=='cuda':
-        end.record(stream)
-        torch.cuda.synchronize()
-
-    print("\n [Evaluation Results]")
-    print("Loss: %2.5f" % eval_losses.avg)
-    print("RMSE: %2.5f" % total_rmse)
-    print("MAE: %2.5f" % total_mae)
-    print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
-    print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
-    print(f"total eval time: {(start.elapsed_time(end))}")
-    print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
-    print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
     
 def eval2(model, ds_iter):
     model.eval()
@@ -377,17 +263,7 @@ def eval2(model, ds_iter):
         ndcg_df = pd.DataFrame()
         with torch.no_grad():
             for step, batch in enumerate(epoch_iterator):     
-                batch['user_seq'] = batch['user_seq'].to(device)
-                batch['user_degree'] = batch['user_degree'].to(device)
-                batch['item_list'] = batch['item_list'].to(device)
-                batch['item_degree'] = batch['item_degree'].to(device)
-                batch['item_rating'] = batch['item_rating'].to(device)
-                batch['anchor_user'] = batch['anchor_user'].to(device)
-                batch['anchor_degree'] = batch['anchor_degree'].to(device)
-                batch['anchor_items'] = batch['anchor_items'].to(device)
-                batch['anchor_item_degree'] = batch['anchor_item_degree'].to(device)
-                batch['imp_fdback'] = batch['imp_fdback'].to(device)
-                batch['exp_fdback'] = batch['exp_fdback'].to(device)
+                batch = {k:v.to(device) for k,v in batch.items()}
                 
                 rank_logits, rating_pred, _, _ = model(batch, is_train=False)
                 mask = (batch['item_rating'] != 0)
@@ -396,52 +272,40 @@ def eval2(model, ds_iter):
                 total_rmse += rmse
                 total_mae += mae
                 
-                # rank metric                
-                df = pd.DataFrame({'users':batch['anchor_user'].data.cpu().tolist(),
-                                   'items':batch['anchor_items'].data.cpu().tolist(),
-                                   'ratings':batch['exp_fdback'].data.cpu().tolist(),
-                                   'logits':rank_logits.data.cpu().tolist()})
-                ndcg_df = pd.concat([ndcg_df, df], axis=0)                
-            
                 epoch_iterator.set_description(
                             "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
                 
-        # calculate NDCG
-        items = torch.from_numpy(np.stack(ndcg_df['items'].values))
-        ratings = torch.from_numpy(np.stack(ndcg_df['ratings'].values))
-        logits = torch.from_numpy(np.stack(ndcg_df['logits'].values))
-        new_k = []
-        ndcg = []
-        for i in range(items.size(0)):
-            k = min((items[i]!=0).sum().item(),10)
-            _,ideal_idx = torch.topk(ratings[i],k)
-            ideal_items = torch.gather(items[i], -1, ideal_idx)
-            ideal_ratings = torch.gather(ratings[i],-1,ideal_idx)
-            # recommended topk
-            _,rec_idx = torch.topk(logits[i], k)
-            rec_items  = torch.gather(items[i],-1,rec_idx)
-            rec_ratings = torch.gather(ratings[i],-1,rec_idx)
-            # mask
-            rowA = rec_items.unsqueeze(1)
-            rowB = ideal_items.unsqueeze(0)
-            mask = (rowA==rowB).any(dim=1)
-            rec_ratings *= mask
-            # dcg/idcg/ndcg
-            discount = torch.log2(torch.arange(k)+2)
-            dcg = torch.sum(rec_ratings/discount, dim=-1)
-            idcg = torch.sum(ideal_ratings/discount, dim=-1)
-            ndcg.append((dcg/(idcg+1e-10)).item())
-            new_k.append(k)
-        
-        ndcg_df['NDCG'] = ndcg
-        ndcg_df['new_k'] = new_k
-        ndcg_mean = ndcg_df.groupby('users')['NDCG'].mean()
-        total_ndcg = np.mean(ndcg_mean.values)
-        print(total_ndcg)
-        ndcg_df.to_csv(f'./ndcg_test_{args.dataset}.csv', index=False)
+                # zero padding인 경우 제외
+                mask = (batch['anchor_items']!=0)
+                rank_output = rank_output*mask
                 
+                item_lst, rating_lst, output_lst = [],[],[]
+                for i in range(batch['anchor_user'].size(0)):
+                    items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
+                    ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
+                    outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
+                    assert len(items)==len(ratings)==len(outputs)
+                    item_lst.append(items)
+                    rating_lst.append(ratings)
+                    output_lst.append(outputs)
+                anchor_users = batch['anchor_user'].data.cpu().tolist()
+                
+                df = pd.DataFrame({'anchor_user':anchor_users,
+                                'anchor_items':item_lst,
+                                'anchor_ratings':rating_lst,
+                                'outputs':output_lst})
+                
+                output_df = pd.concat([output_df, df])
+                
+        output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
+                                                            'anchor_ratings':lambda x:sum(x, start=[]),
+                                                            'outputs':lambda x:sum(x, start=[])}).reset_index()
+        output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
+        output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
+        output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
+        total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
         total_rmse /= (step+1)
-        total_mae /= (step+1)
+        total_mae /= (step+1)           
 
     if device.type=='cuda':
         end.record(stream)
@@ -450,8 +314,9 @@ def eval2(model, ds_iter):
     print("\n [Evaluation Results]")
     print("RMSE: %2.5f" % total_rmse)
     print("MAE: %2.5f" % total_mae)
-    print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
-    print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
+    print("NDCG@10: %2.5f" % total_ndcg)
+    # print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
+    # print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
     print(f"total eval time: {(start.elapsed_time(end))}")
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
@@ -511,20 +376,21 @@ def main():
     total_valid = data_making.total_valid
     total_test = data_making.total_test
 
-    train_ds = MyDataset(total_train)
-    valid_ds = MyDataset(total_valid)
-    test_ds = MyDataset(total_test)
-
-
     ### get model config ###
     model_config = Config[args.dataset]["model"]
     training_config = Config[args.dataset]["training"]
     # batch size update
     training_config["batch_size"] = args.bs
+    
+    # dataset & dataloader
+    train_ds = MyDataset(total_train)
+    valid_ds = MyDataset(total_valid)
+    test_ds = MyDataset(total_test)
+    
     ds_iter = {
-            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
-            "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4),
-            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4)
+            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=1), 
+            "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1),
+            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1)
     }
 
     ######################################################### model initialization #########################################################
@@ -589,24 +455,6 @@ def main():
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
-
-    # 1. file path check(train_augs & test_augs)
-    train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
-    if args.test_augs:
-        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}\n \
-            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
-        valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_valid_{args.train_augs}times.pkl')
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
-    else:
-        print(f"dataset : {args.dataset}\n seed : {args.seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {name_i_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n \
-            num_enc_layers : {name_n_enc}\n num_dec_layers : {name_n_dec}")
-        valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_valid.pkl')
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{name_i_len}_rp_{args.return_params}_test.pkl')
 
     # gpu device선택
     device_ids = list(range(torch.cuda.device_count()))

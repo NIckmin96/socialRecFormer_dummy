@@ -222,15 +222,14 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
     rating_users = rating_split.user_id.unique()
     user_counts = rating_split['user_id'].value_counts()
-    # per_user = user_counts.median()
     per_user = user_counts.quantile(0.25)
-    print("per user : ", per_user)
     # 75% 실험
     if data_path.split('/')[-1] in ['yelp']:
         per_user = min(user_counts.quantile(0.1),2)
+    print("per user : ", per_user)
+    
     anchor_nodes = []
     for user,cnt in user_counts.items():
-        # k = int(min(user_median, cnt))
         k = int(min(per_user, cnt))
         anchor_nodes.extend([user]*k)
         
@@ -246,16 +245,7 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     else:
         anchor_nodes = anchor_nodes
     # save dir 지정
-    file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
-    # if split=='train':
-    #     file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
-    # elif split=='valid':
-    #     file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
-    # else:
-    #     if test_augs:
-    #         file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}_{test_augs}times.csv")
-    #     else:
-    #         file_path = os.path.join(data_path, f"social_user_{len(anchor_nodes)}_rw_length_{walk_length}_rp_{return_params}_split_{split}_seed_{data_split_seed}.csv")
+    file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
 
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path)&(not regenerate):
@@ -290,7 +280,7 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
                         if next_node in seqs:
                             available = set(social_graph.nodes())-set(seqs)
                             if available:
-                                next_node = np.random.choice(list(set(social_graph.nodes())-set(seqs)))
+                                next_node = np.random.choice(list(available))
                             else:
                                 next_node = 0
                                 
@@ -372,17 +362,9 @@ def union_user_item_dict(test_dict, valid_dict):
     
 def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.DataFrame, seed:int, split:str, random_walk_len:int=30, item_per_user:int=5, return_params:int=1, train_augs:int=1, test_augs:bool=True, rating_thres:int=3, regenerate:bool=False, test_user_item:dict={}):
 
-    # spd_path = 'shortest_path_result.npy'
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}.pkl"
-    # if split=='train':
-    #     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_train_{train_augs}times.pkl"
-    # elif split=='valid':
-    #     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_valid.pkl"
-    # else:
-    #     test_augs = min(train_augs, 3) # test augmentation은 최대 3배까지
-    #     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_rp_{return_params}_test_{test_augs}times.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(not regenerate):
@@ -480,16 +462,12 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         # item(anchor user에 해당)
         print("Processing Item sequences / Degrees ...")
         total_df['anchor_degree'] = total_df['user_degree'].map(lambda x:x[0])
-        # total_df['anchor_items'] = total_df['user_id'].map(user_product_dic)
-        total_df['anchor_items'] = total_df['user_id'].map(user_item)
-        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
-        # total_df['anchor_ratings'] = total_df['user_id'].map(user_rating_dic)
-        total_df['anchor_ratings'] = total_df['user_id'].map(user_rating)
-        total_df['anchor_ratings'] = total_df['anchor_ratings'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
+        total_df['anchor_items'] = total_df['user_id'].map(user_product_dic)
+        total_df['anchor_ratings'] = total_df['user_id'].map(user_rating_dic)
         total_df = total_df.explode(['anchor_items','anchor_ratings'])
         # total_df = total_df.drop_duplicates(subset='user_id',keep='first')
         total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic[x], seq)))
-        total_df['imp_fdback'] = total_df['anchor_ratings'].map(lambda seq:list(map(lambda x:1 if x>=rating_thres else 0,seq)))
+        # total_df['imp_fdback'] = total_df['anchor_ratings'].map(lambda seq:list(map(lambda x:1 if x>=rating_thres else 0,seq)))
         # item(user sequence에 해당)\
         total_df['item_sequences'] = total_df['user_sequences'].progress_map(lambda seq:list(map(map_user_item, seq)))
         total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:sum(x,start=[])).map(lambda x:list(set(x)-set([0])))
@@ -512,8 +490,7 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         del rating_matrix
         
         # dev -> spd_loss 제거
-        total_df = total_df[['user_id','user_sequences','user_degree','anchor_degree','anchor_items','anchor_item_degree','imp_fdback','anchor_ratings',
-                             'item_sequences','item_degree','item_rating']]
+        total_df = total_df[['user_id','user_sequences','user_degree','item_sequences','item_degree','item_rating','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree']]
 
         with open(total_path, "wb") as file:
             pickle.dump(total_df, file)

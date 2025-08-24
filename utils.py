@@ -101,6 +101,9 @@ def RMSE(pred, y, mask=None):
 
     return torch.sqrt(MSE(pred, y, mask))
 
+def CE(pred, y):
+    return -(y*pred.log()).sum(dim=1).mean()
+
 class RankMetric:
     def __init__(self, items, implicit, explicit, logits, k):
         self.k=k
