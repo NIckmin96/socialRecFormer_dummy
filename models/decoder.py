@@ -101,7 +101,7 @@ class Decoder(nn.Module):
         
         # [bs, i, d] => [bs, i]
         rank_output = torch.mean(output, dim=-1)
-        # rank_logits = F.sigmoid(output)
+        # rank_output = F.sigmoid(output)
         # rank_logits = F.softmax(output, dim=-1)
 
         del self_attn_mask, cross_attn_mask_1, cross_attn_mask_2

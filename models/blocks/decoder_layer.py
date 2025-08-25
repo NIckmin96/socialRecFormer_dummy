@@ -22,9 +22,10 @@ class DecoderLayer(nn.Module):
         self.self_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads, is_dec_layer=self.dec_layer)
         self.dropout_self = nn.Dropout(p=dropout)
         
-        # # self attention - ffn
-        # self.norm_self_moe = nn.LayerNorm(d_model)
-        # self.dropout_self_moe = nn.Dropout(p=dropout)
+        # self attention - ffn
+        self.norm_self_moe = nn.LayerNorm(d_model)
+        self.self_moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
+        self.dropout_self_moe = nn.Dropout(p=dropout)
         
 
         # Cross Attention(1) : user sequences - item sequences 간의 aggregation
@@ -36,7 +37,6 @@ class DecoderLayer(nn.Module):
         self.norm_cross1_moe = nn.LayerNorm(d_model)
         self.cross_moe1 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.dropout_cross1_moe = nn.Dropout(p=dropout)
-        
         
             
         # Cross Attention(2) : anchor user - item sequences 간의 aggregation
@@ -63,6 +63,13 @@ class DecoderLayer(nn.Module):
         x_item = self.norm_self(x_item)
         x, _ = self.self_attention(Q=x_item, K=x_item, V=x_item, mask=self_attn_mask, attn_bias=None)
         x = self.dropout_self(x)
+        x = x + residual
+        
+        # 1-1. MoE
+        residual = x
+        x = self.norm_self_moe(x)
+        x = self.self_moe(x)
+        x = self.dropout_self_moe(x)
         x = x + residual
         
         # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation

@@ -92,8 +92,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
             rank_output, rating_pred, _, _ = model(batch, is_train=False)
             mask = (batch['item_rating'] != 0)
             rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
-            y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
-            rmse += RMSE(rank_output, y_rank_value)
+            # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
+            # rmse += RMSE(rank_output, y_rank_value)
             mae = MAE(rating_pred, batch['item_rating'], mask)
             
             total_rmse += rmse
@@ -195,7 +195,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             
-            loss = org_loss + rank_loss
+            # loss = org_loss + rank_loss
+            loss = org_loss
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -246,67 +247,63 @@ def eval2(model, ds_iter):
         stream = torch.cuda.current_stream(device=device)
         start.record(stream)
         
+    epoch_iterator = tqdm(ds_iter['test'],
+                    desc="Validating (X / X Steps) (loss=X.X)",
+                    ascii=" =",
+                    bar_format="{l_bar}{r_bar}",
+                    dynamic_ncols=True,
+                    leave=False)
+
+    total_rmse, total_mae = 0.0, 0.0
+    output_df = pd.DataFrame()
     with torch.no_grad():
-        epoch_iterator = tqdm(ds_iter['test'],
-                        desc="Validating (X / X Steps) (loss=X.X)",
-                        ascii=" =",
-                        bar_format="{l_bar}{r_bar}",
-                        dynamic_ncols=True,
-                        leave=False)
-
-        total_rmse, total_mae = 0.0, 0.0
-        total_precision_5, total_precision_10 = 0.0, 0.0
-        total_recall_5, total_recall_10 = 0.0, 0.0
-        total_ndcg_5, total_ndcg_10 = 0.0, 0.0
+        for step, batch in enumerate(epoch_iterator):     
+            batch = {k:v.to(device) for k,v in batch.items()}
+            
+            rank_output, rating_pred, _, _ = model(batch, is_train=False)
+            mask = (batch['item_rating'] != 0)
+            rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
+            mae = MAE(rating_pred, batch['item_rating'], mask)
+            total_rmse += rmse
+            total_mae += mae
+            
+            epoch_iterator.set_description(
+                        "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
+            
+            # zero padding인 경우 제외
+            mask = (batch['anchor_items']!=0)
+            rank_output = rank_output*mask
+            
+            item_lst, rating_lst, output_lst = [],[],[]
+            for i in range(batch['anchor_user'].size(0)):
+                items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
+                outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
+                assert len(items)==len(ratings)==len(outputs)
+                item_lst.append(items)
+                rating_lst.append(ratings)
+                output_lst.append(outputs)
+            anchor_users = batch['anchor_user'].data.cpu().tolist()
+            
+            df = pd.DataFrame({'anchor_user':anchor_users,
+                            'anchor_items':item_lst,
+                            'anchor_ratings':rating_lst,
+                            'outputs':output_lst})
+            
+            output_df = pd.concat([output_df, df])
+            
+    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
+                                                        'anchor_ratings':lambda x:sum(x, start=[]),
+                                                        'outputs':lambda x:sum(x, start=[])}).reset_index()
+    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
+    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
+    output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
+    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    total_rmse /= (step+1)
+    total_mae /= (step+1)           
+    
+    output_df.to_csv(f'eval_output_{args.dataset}.csv')
         
-        # NDCG : user별 중복 계산(input이 다르므로, 다른 결과 발생) -> 1. 그 중에서 best를 선택하는 코드
-        ndcg_df = pd.DataFrame()
-        with torch.no_grad():
-            for step, batch in enumerate(epoch_iterator):     
-                batch = {k:v.to(device) for k,v in batch.items()}
-                
-                rank_logits, rating_pred, _, _ = model(batch, is_train=False)
-                mask = (batch['item_rating'] != 0)
-                rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
-                mae = MAE(rating_pred, batch['item_rating'], mask)
-                total_rmse += rmse
-                total_mae += mae
-                
-                epoch_iterator.set_description(
-                            "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
-                
-                # zero padding인 경우 제외
-                mask = (batch['anchor_items']!=0)
-                rank_output = rank_output*mask
-                
-                item_lst, rating_lst, output_lst = [],[],[]
-                for i in range(batch['anchor_user'].size(0)):
-                    items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
-                    ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
-                    outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
-                    assert len(items)==len(ratings)==len(outputs)
-                    item_lst.append(items)
-                    rating_lst.append(ratings)
-                    output_lst.append(outputs)
-                anchor_users = batch['anchor_user'].data.cpu().tolist()
-                
-                df = pd.DataFrame({'anchor_user':anchor_users,
-                                'anchor_items':item_lst,
-                                'anchor_ratings':rating_lst,
-                                'outputs':output_lst})
-                
-                output_df = pd.concat([output_df, df])
-                
-        output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
-                                                            'anchor_ratings':lambda x:sum(x, start=[]),
-                                                            'outputs':lambda x:sum(x, start=[])}).reset_index()
-        output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
-        output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
-        output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
-        total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
-        total_rmse /= (step+1)
-        total_mae /= (step+1)           
-
     if device.type=='cuda':
         end.record(stream)
         torch.cuda.synchronize()
@@ -359,9 +356,6 @@ def main():
                         datefmt='%m/%d/%Y %H:%M:%S',
                         level=logging.INFO)
     ######################################################### data preparation #########################################################
-
-    ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
-        ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
 
 
     # regenerate 여부 확인
@@ -497,7 +491,6 @@ def main():
         factor = 0.85,
         patience = 3,
         threshold = 1e-2,
-        # min_lr = 1e-6,
         verbose = True
     )
 
