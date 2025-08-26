@@ -185,6 +185,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                             dynamic_ncols=True,
                             leave=False)
         
+        users, items, ratings, preds = [],[],[],[]
         for step, batch in enumerate(epoch_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
@@ -195,8 +196,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             
-            # loss = org_loss + rank_loss
-            loss = org_loss
+            loss = org_loss + rank_loss
+            # loss = org_loss
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -207,6 +208,18 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             org_losses.update(org_loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
+            
+            # users.append(batch['anchor_user'])
+            # non_zero = batch['anchor_items']!=0
+            # items.append(batch['anchor_items'][non_zero])
+            # ratings.append(batch['anchor_ratings'][non_zero])
+            # preds.append(rank_output[non_zero])
+            
+        # users = torch.stack(users, dim=0)
+        # items = torch.stack(users, dim=0)
+        # ratings = torch.stack(users, dim=0)
+        # preds = torch.stack(users, dim=0)
+        # print(users.size(), items.size(), ratings.size(), preds.size())
             
         # validation
         if device.type=='cuda':
@@ -228,7 +241,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         if epoch > 100:
             break
-        if update_cnt > 15: 
+        if update_cnt > 10: 
             break
     writer.close()
 

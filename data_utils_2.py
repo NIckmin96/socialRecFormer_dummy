@@ -57,7 +57,7 @@ def mat_to_csv(data_path:str, regenerate=False):
         trust_df = trust_df.dropna(how='any')
         trust_df = trust_df.drop_duplicates(keep='first')
         
-        if dataset_name in ['yelp', 'Douban']:
+        if dataset_name in ['yelp']:
             # 1. user당 rating이 너무 적은 경우 제외
             rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
             # trust를 기준으로 user를 sampling
@@ -153,7 +153,7 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
         print(f"Creating Social {split} split sets...\n")
         # trust_df = pd.read_csv(data_path + '/trustnetwork_org.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
-        social_split = trust_df[(trust_df['user_id_1'].isin(users)) & (trust_df['user_id_2'].isin(users))]
+        social_split = trust_df[(trust_df['user_id_1'].isin(users)) | (trust_df['user_id_2'].isin(users))]
 
         # save
         social_split.to_csv(social_file, index=False)
@@ -307,10 +307,13 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
 def find_next_node(input_G, previous_node, current_node): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
     # 문제 : neighbor가 많을 경우에, 이전 노드로 돌아갈 확률이 다른 노드로 갈 확률보다 높아짐 -> 의도된 것?
     # return param을 고정하지않고, neighbor의 개수에 따라 유동적으로 변하는게 합리적임 -> n개의 neighbor가 있으면, x = (1/n)*n + return, 1 = (1/nx)*n + return/x
-    if current_node!=0:
-        neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
+    if current_node in input_G.nodes():
+        if current_node!=0:
+            neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
+        else:
+            neighbors = list(input_G.nodes())
     else:
-        neighbors = list(input_G.nodes())
+        neighbors = list(set(input_G.nodes())-{current_node})
     n = len(neighbors)
     
     if n==0:
@@ -459,6 +462,7 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, item_df:pd.Dat
         print("Processing Item sequences / Degrees ...")
         total_df['anchor_degree'] = total_df['user_degree'].map(lambda x:x[0])
         total_df['anchor_items'] = total_df['user_id'].map(user_product_dic)
+        print(total_df[total_df['anchor_items'].isnull()])
         total_df['anchor_ratings'] = total_df['user_id'].map(user_rating_dic)
         total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
         total_df['anchor_ratings'] = total_df['anchor_ratings'].progress_map(lambda x:slice_and_pad_list(x,item_seq_len))
