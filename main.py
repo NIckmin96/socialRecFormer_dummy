@@ -334,6 +334,7 @@ def eval2(model, ds_iter):
 def get_args():
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
     parser.add_argument("--device", type=str, default='single')
+    parser.add_argument("--id", type=int, default=0)
     parser.add_argument("--eval", type = bool, default=False,
                         help="train eval")
     parser.add_argument("--checkpoint", type = str, default="test",
@@ -481,7 +482,7 @@ def main():
     if args.device=='cpu':
         device = torch.device(args.device)
     else:
-        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        device = torch.device(f'cuda:{args.id}' if torch.cuda.is_available() else 'cpu')
     
     print(f"GPU index: {device.index}")
     print("\n")
