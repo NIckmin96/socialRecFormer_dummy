@@ -345,7 +345,7 @@ def get_args():
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
     parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
-    parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
+    parser.add_argument('--lr', type=float, default=3e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
