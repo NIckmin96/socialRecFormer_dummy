@@ -25,11 +25,6 @@ from dataset import MyDataset
 from models.transformer import Transformer
 from scheduler import WarmupCosineSchedule
 
-# Ray Tune
-from ray import tune
-from ray.tune.schedulers import ASHAScheduler
-from ray.tune.search.optuna import OptunaSearch
-
 logger = logging.getLogger(__name__)
 
 class DeviceError(Exception):
@@ -479,7 +474,7 @@ def get_args():
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--train_augs', type=int, default=1, help="how many times augment train data per anchor user")    
     parser.add_argument('--test_augs', type=bool, default=True, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
-    parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
+    parser.add_argument('--regen', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
     args = parser.parse_args()
@@ -500,7 +495,7 @@ def main():
 
 
     # regenerate 여부 확인
-    if args.regenerate:
+    if args.regen:
         print("Re-Creating Datatset...")
     else:
         print("Loading Datatset...")
