@@ -85,7 +85,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     total_rmse, total_mae = 0.0, 0.0
     output_df = pd.DataFrame()
     with torch.no_grad():
-        epoch_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        epoch_iterator = tqdm(ds_iter['test'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(epoch_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
@@ -392,12 +392,12 @@ def main():
     
     # dataset & dataloader
     train_ds = MyDataset(total_train)
-    valid_ds = MyDataset(total_valid)
+    # valid_ds = MyDataset(total_valid)
     test_ds = MyDataset(total_test)
     
     ds_iter = {
             "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=1), 
-            "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1),
+            # "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1),
             "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1)
     }
 

@@ -125,14 +125,14 @@ def add_degree(rating_df, trust_df):
 def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False):
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
-    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    # valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
     # if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regenerate)):
     if os.path.isfile(train_path) & os.path.isfile(test_path) & (not regenerate):
         print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
-        rating_valid_set = pd.read_csv(valid_path)
+        # rating_valid_set = pd.read_csv(valid_path)
         rating_test_set = pd.read_csv(test_path)
         
     else:
@@ -142,17 +142,18 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False
         split_rating_df = shuffle(rating_df, random_state=seed)
         num_test = int(len(split_rating_df)*test)
         
-        rating_test_set = split_rating_df.iloc[:num_test//2]
-        rating_valid_set = split_rating_df.iloc[num_test//2:num_test]
+        rating_test_set = split_rating_df.iloc[:num_test]
+        # rating_valid_set = split_rating_df.iloc[num_test//2:num_test]
         rating_train_set = split_rating_df.iloc[num_test:]
 
         rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
-        rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
+        # rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
     
     print(f"data split finished, seed: {seed}\n")
     
-    return rating_train_set, rating_valid_set, rating_test_set
+    # return rating_train_set, rating_valid_set, rating_test_set
+    return rating_train_set, rating_test_set
 
 def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, trust_df, seed:int=42, regenerate=False):
     """
@@ -300,7 +301,7 @@ def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame
     if regenerate:
         random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
         random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_valid['random_walk_seq'])]
-        random_walk_valid = random_walk_valid[~random_walk_valid['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
+        # random_walk_valid = random_walk_valid[~random_walk_valid['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
 
         random_walk_train.reset_index(drop=True, inplace=True); random_walk_valid.reset_index(drop=True, inplace=True); random_walk_test.reset_index(drop=True, inplace=True)
 
