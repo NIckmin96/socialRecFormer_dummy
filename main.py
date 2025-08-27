@@ -381,7 +381,7 @@ def main():
     
     print("\n")
     total_train = data_making.total_train
-    total_valid = data_making.total_valid
+    # total_valid = data_making.total_valid
     total_test = data_making.total_test
 
     ### get model config ###
