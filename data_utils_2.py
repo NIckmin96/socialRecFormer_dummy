@@ -74,15 +74,13 @@ def mat_to_csv(data_path:str, regenerate=False):
             
         rating_matrix = rating_matrix.tocsr()
         sparse.save_npz(os.path.join(data_path, 'rating_matrix.npz'), rating_matrix) # csr matrix 형태로 저장
-        # rating_matrix = rating_matrix.toarray()
-        # np.save(data_path + '/rating_matrix.npy', rating_matrix)
 
         rating_df.to_csv(data_path + '/rating.csv', index=False)
         trust_df.to_csv(data_path + '/trustnetwork.csv', index=False)
     
     # data statistics
     print(f"***** Dataset Statistics *****")
-    print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())+1}")
+    print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())}")
     print(f"# of users in rating df : {rating_df.user_id.nunique()}")
     assert rating_df.product_id.nunique()==rating_df.product_id.max()
     print(f"# of items : {rating_df.product_id.nunique()}")
@@ -93,10 +91,8 @@ def mat_to_csv(data_path:str, regenerate=False):
 
 def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:   
     # filter data by users(existing in both columns in trust_df)
-    # total_users = rating_df.user_id.unique()
     total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
-    # trust_df = trust_df[trust_df.user_id_1.isin(total_users)|trust_df.user_id_2.isin(total_users)]
     trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
     
     # Generate user id mapping table
@@ -125,14 +121,14 @@ def add_degree(rating_df, trust_df):
 def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False):
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
-    # valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
     # if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regenerate)):
     if os.path.isfile(train_path) & os.path.isfile(test_path) & (not regenerate):
         print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
-        # rating_valid_set = pd.read_csv(valid_path)
+        rating_valid_set = pd.read_csv(valid_path)
         rating_test_set = pd.read_csv(test_path)
         
     else:
@@ -142,18 +138,21 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regenerate=False
         split_rating_df = shuffle(rating_df, random_state=seed)
         num_test = int(len(split_rating_df)*test)
         
-        rating_test_set = split_rating_df.iloc[:num_test]
-        # rating_valid_set = split_rating_df.iloc[num_test//2:num_test]
+        # rating_test_set = split_rating_df.iloc[:num_test]
+        # rating_train_set = split_rating_df.iloc[num_test:]
+        
+        rating_test_set = split_rating_df.iloc[:num_test//2]
+        rating_valid_set = split_rating_df.iloc[num_test//2:num_test]
         rating_train_set = split_rating_df.iloc[num_test:]
 
         rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
-        # rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
+        rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
     
     print(f"data split finished, seed: {seed}\n")
     
-    # return rating_train_set, rating_valid_set, rating_test_set
-    return rating_train_set, rating_test_set
+    return rating_train_set, rating_valid_set, rating_test_set
+    # return rating_train_set, rating_test_set
 
 def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, trust_df, seed:int=42, regenerate=False):
     """
@@ -184,17 +183,26 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     anchor_nodes = []
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
     
-    if split=='train':
-        rating_users = rating_split.user_id.unique()
-        user_counts = rating_split['user_id'].value_counts()
-        per_user = user_counts.quantile(0.25)
-        if data_path.split('/')[-1] in ['yelp']:
-            per_user = 1
-        
-    else:
-        per_user=1
-        rating_users = social_graph.nodes()
-        user_counts = {user:per_user for user in social_graph.nodes()}
+    ####### train=75% / 나머지 = 1번 #######
+    # if split=='train':
+    #     rating_users = rating_split.user_id.unique()
+    #     user_counts = rating_split['user_id'].value_counts()
+    #     per_user = user_counts.quantile(0.25)
+    #     if data_path.split('/')[-1] in ['yelp']:
+    #         per_user = 1
+    
+    # else:
+    #     per_user=1
+    #     rating_users = social_graph.nodes()
+    #     user_counts = {user:per_user for user in social_graph.nodes()}
+    ######################################
+    
+    # rating split기준 실험
+    rating_users = rating_split.user_id.unique()
+    user_counts = rating_split['user_id'].value_counts()
+    per_user = user_counts.quantile(0.25)
+    if data_path.split('/')[-1] in ['yelp']:
+        per_user = 1
         
     print("per user : ", per_user)
     
@@ -337,7 +345,7 @@ def generate_input_sequence_data(data_path, user_df:pd.DataFrame, rating_df:pd.D
         print(f"{split} total df(input_sequence_data) doesn't exist!")
         print(f"Creating {split} total df(input_sequence_data)...")
         
-        if split=='test':
+        if split=='train':
             used_pairs = {user:set() for user in rating_df.user_id.unique()}
         
         rating_matrix = sparse.load_npz(os.path.join(data_path, 'rating_matrix.npz'))

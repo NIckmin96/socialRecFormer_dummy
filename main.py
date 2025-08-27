@@ -78,6 +78,31 @@ def NDCG(items, logits, ratings):
     
     return ndcg
 
+def BPR(output_batch, rating_batch):
+    bpr_loss = 0.0
+    logits = output_batch[rating_batch==1]
+    logit_1 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==2]
+    logit_2 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==3]
+    logit_3 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==4]
+    logit_4 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==5]
+    logit_5 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+        diff = pos-(neg+0.1)
+        loss = -F.logsigmoid(diff)
+        bpr_loss += loss
+        
+    return bpr_loss
+        
+
 def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_mae, best_ndcg, update_cnt):
     eval_losses = AverageMeter()
     model.eval()
@@ -85,7 +110,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     total_rmse, total_mae = 0.0, 0.0
     output_df = pd.DataFrame()
     with torch.no_grad():
-        epoch_iterator = tqdm(ds_iter['test'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        epoch_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(epoch_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
@@ -135,7 +160,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     total_rmse /= (step+1)
     total_mae /= (step+1)
             
-    if ((1/total_rmse)*0.4+(total_ndcg)*0.6 > (1/best_rmse)*0.4+(best_ndcg)*0.6): 
+    if ((1/total_rmse)*0.1+(total_ndcg)*0.9 > (1/best_rmse)*0.1+(best_ndcg)*0.9): 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_mae = total_mae
@@ -179,13 +204,14 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     for epoch in range(total_epochs):
         losses = AverageMeter()
         org_losses = AverageMeter()
+        rank_losses = AverageMeter()
         epoch_iterator = tqdm(ds_iter['train'],
                             desc="Training (X / X Steps) (loss=X.X)",
                             bar_format="{l_bar}{r_bar}",
                             dynamic_ncols=True,
                             leave=False)
         
-        users, items, ratings, preds = [],[],[],[]
+        
         for step, batch in enumerate(epoch_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
@@ -193,10 +219,13 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
             rating_mask = (batch['item_rating'] != 0)            
             org_loss = RMSE(rating_pred, batch['item_rating'], rating_mask)
-            y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
-            rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            org_losses.update(org_loss)
+            # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
+            # rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_losses.update(rank_loss)
             
-            loss = org_loss + rank_loss
+            loss = 0.3*org_loss + 0.7*rank_loss
             # loss = org_loss
             loss.backward()
 
@@ -205,21 +234,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             optimizer.zero_grad()
 
             losses.update(loss)
-            org_losses.update(org_loss)
             epoch_iterator.set_description(
                         "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
-            
-            # users.append(batch['anchor_user'])
-            # non_zero = batch['anchor_items']!=0
-            # items.append(batch['anchor_items'][non_zero])
-            # ratings.append(batch['anchor_ratings'][non_zero])
-            # preds.append(rank_output[non_zero])
-            
-        # users = torch.stack(users, dim=0)
-        # items = torch.stack(users, dim=0)
-        # ratings = torch.stack(users, dim=0)
-        # preds = torch.stack(users, dim=0)
-        # print(users.size(), items.size(), ratings.size(), preds.size())
             
         # validation
         if device.type=='cuda':
@@ -235,10 +251,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
-        # # Ray recording
-        # tune.report({"loss":valid_loss})
-
-        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         if epoch > 100:
             break
         if update_cnt > 10: 
@@ -346,10 +359,10 @@ def get_args():
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
     parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
-    parser.add_argument('--lr', type=float, default=3e-3) # rating 기준 rw 생성의 경우 default = 1e-3
+    parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
-    parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
+    parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
@@ -381,7 +394,7 @@ def main():
     
     print("\n")
     total_train = data_making.total_train
-    # total_valid = data_making.total_valid
+    total_valid = data_making.total_valid
     total_test = data_making.total_test
 
     ### get model config ###
@@ -392,12 +405,12 @@ def main():
     
     # dataset & dataloader
     train_ds = MyDataset(total_train)
-    # valid_ds = MyDataset(total_valid)
+    valid_ds = MyDataset(total_valid)
     test_ds = MyDataset(total_test)
     
     ds_iter = {
             "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=1), 
-            # "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1),
+            "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1),
             "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1)
     }
 
@@ -493,9 +506,7 @@ def main():
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr = training_config["learning_rate"],
-        betas=(0.9, 0.999), eps=1e-6, weight_decay=training_config["weight_decay"]
-    )
+        lr = training_config["learning_rate"])
 
     training_config["num_train_steps"] = len(ds_iter['train'])
 
