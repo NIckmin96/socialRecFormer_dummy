@@ -46,26 +46,25 @@ class Encoder(nn.Module):
             ) for _ in range(num_layers)]
         )
 
-        self.spatial_pos_bias = SpatialEncoder(
-            # num_nodes = self.num_user,
-            max_spd_value = self.max_spd_value,
-            num_heads = num_heads
-        )
+        # self.spatial_pos_bias = SpatialEncoder(
+        #     # num_nodes = self.num_user,
+        #     max_spd_value = self.max_spd_value,
+        #     num_heads = num_heads
+        # )
     
     def forward(self, batched_data):
         x = self.input_embed(batched_data['user_seq'], batched_data['user_degree'])
 
         # Generate mask for padded data
         src_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
-        attn_bias = self.spatial_pos_bias(batched_data)
+        # attn_bias = self.spatial_pos_bias(batched_data)
 
         losses = []
         # Encoder layer forward pass (MHA, FFN)
         for layer in self.enc_layers:
-            x, spd_loss = layer(x, src_mask, attn_bias)
+            x, spd_loss = layer(x, src_mask, None)
             # x, spd_loss = layer(x, src_mask, None)
             losses.append(spd_loss)
 
-        del src_mask, attn_bias
         
         return x, sum(losses)/len(losses), self.input_embed

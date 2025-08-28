@@ -31,20 +31,20 @@ class ScaledDotProductAttention(nn.Module):
         loss = 0
         
         ######################################################## [ORG] ########################################################
-        if attn_bias is not None:
-            # score += attn_bias
-            if is_dec_layer: 
-                if is_rating:
-                    # Rating loss(RMSE)
-                    loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float(), reduction='mean'))
-                else:
-                    # Ranking loss(BCE)
-                    loss = F.binary_cross_entropy_with_logits(score.squeeze(-1).float(), attn_bias.float(), reduction='mean')
+        # if attn_bias is not None:
+        #     # score += attn_bias
+        #     if is_dec_layer: 
+        #         if is_rating:
+        #             # Rating loss(RMSE)
+        #             loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float(), reduction='mean'))
+        #         else:
+        #             # Ranking loss(BCE)
+        #             loss = F.binary_cross_entropy_with_logits(score.squeeze(-1).float(), attn_bias.float(), reduction='mean')
     
-            else:
-                # encoder loss(attn_bias : user간의 distance / encoder attention score vs attn_bias)
-                attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double())
-                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float(), reduction='mean')) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
+        #     else:
+        #         # encoder loss(attn_bias : user간의 distance / encoder attention score vs attn_bias)
+        #         attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double())
+        #         loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float(), reduction='mean')) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
                 
         ### Decoder 마지막 layer에서 Q * K.T(score)의 Head를 기준으로한 mean값을 Return
         if last_layer_flag:
