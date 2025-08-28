@@ -18,10 +18,10 @@ from scipy import sparse
 from data_preprocess import prepare_org_data
 
 # 최초 한번만 실행
-def mat_to_csv(data_path:str, regen=False):
+def mat_to_csv(data_path:str, regen):
     rating_path = os.path.join(data_path,'rating.csv')
     trust_path = os.path.join(data_path,'trustnetwork.csv')
-    if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (not regen):
+    if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (regen=='all'):
         rating_df = pd.read_csv(rating_path)
         trust_df = pd.read_csv(trust_path)
     
@@ -108,14 +108,14 @@ def add_degree(rating_df, trust_df):
     return rating_df
 
 
-def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regen=False):
+def shuffle_and_split_dataset(data_path:str, test, seed, regen):
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
     valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
     # if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regen)):
-    if os.path.isfile(train_path) & os.path.isfile(test_path) & (not regen):
+    if os.path.isfile(train_path) & os.path.isfile(test_path) & (regen=='all'):
         print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
         rating_valid_set = pd.read_csv(valid_path)
