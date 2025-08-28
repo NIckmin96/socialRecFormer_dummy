@@ -91,7 +91,7 @@ class DecoderLayer(nn.Module):
         x = self.norm_cross2(x)
         new_enc_output = enc_output + x_anchor.expand(-1,enc_output.size(1),-1) # [TODO] Concatenation으로 변경해서 실험
         x, _ = self.cross_attention2(Q=x, K=new_enc_output, V=new_enc_output, mask=cross_attn_mask_2, attn_bias=None)
-        # # Ranking loss(BCE)
+        # Ranking loss(BCE)
         # bce_loss = F.binary_cross_entropy_with_logits(torch.mean(x, dim=-1).float(), ranking_bias.float(), reduction='mean')
         x = self.dropout_cross2(x)
         x = x + residual
