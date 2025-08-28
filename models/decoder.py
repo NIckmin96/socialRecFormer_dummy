@@ -86,17 +86,17 @@ class Decoder(nn.Module):
         cross_attn_mask_1 = generate_attn_pad_mask(batched_data['item_list'], batched_data['user_seq']).to(device) # [batch_size, seq_len_item, seq_len_user]
         cross_attn_mask_2 = generate_attn_pad_mask(batched_data['anchor_items'], batched_data['anchor_user'].unsqueeze(1)).to(device) # [bs x i x 1]
 
-        ranking_bias = self.ranking_bias(batched_data['imp_fdback'])
-        rating_bias = self.rating_bias(batched_data['item_rating'])
+        # ranking_bias = self.ranking_bias(batched_data['imp_fdback'])
+        # rating_bias = self.rating_bias(batched_data['item_rating'])
             
         rmse_losses = []
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
-            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
+            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, None, None)
             rmse_losses.append(rmse_loss)
         
         # Pass to prediction layer
-        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias)
+        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, None, None)
         rmse_losses.append(rmse_loss)
         
         # [bs, i, d] => [bs, i]

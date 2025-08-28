@@ -1,9 +1,10 @@
 import os
+import argparse
 import pandas as pd
 import numpy as np
 from scipy.io import loadmat
 
-def prepare_org_data(data, side_info=False):
+def prepare_org_data(data, side_info=True):
     print("Processing _org.csv data...")
     # data_dir = os.path.join('dataset',data)
     data_dir = data
@@ -13,7 +14,7 @@ def prepare_org_data(data, side_info=False):
         trust_mat = loadmat(os.path.join(data_dir, 'trustnetwork.mat'))
 
         rating_arr = rating_mat['rating'].astype(np.int64)
-        trust_arr = trust_mat['trust']
+        trust_arr = trust_mat['trust'].astype(np.int64)
 
         rating_df = pd.DataFrame(rating_arr, columns=['user_id','product_id','category_id','rating','helpfullness','timestamp'])
         trust_df = pd.DataFrame(trust_arr, columns=['user_id_1','user_id_2'])
@@ -27,7 +28,7 @@ def prepare_org_data(data, side_info=False):
         trust_mat = loadmat(os.path.join(data_dir, 'trustnetwork.mat'))
 
         rating_arr = rating_mat['rating'].astype(np.int64)
-        trust_arr = trust_mat['trustnetwork']
+        trust_arr = trust_mat['trustnetwork'].astype(np.int64)
 
         rating_df = pd.DataFrame(rating_arr, columns=['user_id', 'product_id', 'category_id', 'rating', 'helpfulness'])
         trust_df = pd.DataFrame(trust_arr, columns=['user_id_1','user_id_2'])
@@ -43,7 +44,7 @@ def prepare_org_data(data, side_info=False):
         rating_mat = loadmat(os.path.join(data_dir, 'rating_with_timestamp.mat'))
         trust_mat = loadmat(os.path.join(data_dir, 'trustnetwork.mat'))
         rating_arr = rating_mat['rating_with_timestamp'].astype(np.int64)
-        trust_arr = trust_mat['trustnetwork']
+        trust_arr = trust_mat['trust'].astype(np.int64)
 
         rating_df = pd.DataFrame(rating_arr, columns=['user_id','product_id','category_id','rating','helpfullness','timestamp'])
         trust_df = pd.DataFrame(trust_arr, columns=['user_id_1','user_id_2'])
@@ -124,6 +125,18 @@ def prepare_org_data(data, side_info=False):
     rating_df.to_csv(os.path.join(data_dir, 'rating_org.csv'), index=False)
     trust_df.to_csv(os.path.join(data_dir, 'trustnetwork_org.csv'), index=False)
     
-    print("DONE")
+    print("###### Data Source Processed ######")
+    print(f"Num of users : {rating_df.user_id.nunique()}")
+    print(f"Num of items : {rating_df.product_id.nunique()}")
+    print("###################################\n")
 
     return rating_df, trust_df
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data', type=str, default='ciao')
+    parser.add_argument('--side', type=bool, default=True)
+    args = parser.parse_args()
+    data_dir = os.path.join('dataset',args.data)
+    
+    prepare_org_data(data_dir, args.side)
