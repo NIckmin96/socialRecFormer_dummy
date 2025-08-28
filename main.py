@@ -225,7 +225,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_losses.update(rank_loss)
             
-            loss = 0.3*org_loss + 0.7*rank_loss
+            loss = 0.4*org_loss + 0.6*rank_loss
             # loss = org_loss
             loss.backward()
 
