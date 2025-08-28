@@ -366,8 +366,7 @@ def get_args():
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
-    parser.add_argument('--train_augs', type=int, default=1, help="how many times augment train data per anchor user")    
-    parser.add_argument('--test_augs', type=bool, default=True, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
+    parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="Whether regen dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
@@ -386,8 +385,12 @@ def main():
 
 
     # regen 여부 확인
-    if args.regen!='no':
-        print("Re-Creating Datatset...")
+    if args.regen == 'all':
+        print("Re-Creating All Datatset...")
+    elif args.regen=='total':
+        print("Re-Creating total_df...")
+    elif args.regen=='rw':
+        print("Re-Creating rw_seq & total_df...")
     else:
         print("Loading Datatset...")
     data_making = dm.DatasetMaking(args)
