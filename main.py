@@ -327,7 +327,7 @@ def get_args():
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
     parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
-    parser.add_argument('--lr', type=float, default=1e-2) # rating 기준 rw 생성의 경우 default = 1e-3
+    parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
@@ -335,7 +335,7 @@ def get_args():
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
-    parser.add_argument('--regen', type=bool, default=False, help="Whether regen dataframe(random walk & total df) or not")    
+    parser.add_argument('--regen', type=str, default='no', help="Whether regen dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
     args = parser.parse_args()
@@ -353,8 +353,12 @@ def main():
 
 
     # regen 여부 확인
-    if args.regen:
-        print("Re-Creating Datatset...")
+    if args.regen == 'all':
+        print("Re-Creating All Datatset...")
+    elif args.regen=='total':
+        print("Re-Creating total_df...")
+    elif args.regen=='rw':
+        print("Re-Creating rw_seq & total_df...")
     else:
         print("Loading Datatset...")
     data_making = dm.DatasetMaking(args)

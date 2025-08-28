@@ -11,17 +11,17 @@ import pandas as pd
 from ast import literal_eval    # convert str type list to original type
 from scipy.io import loadmat
 from tqdm.auto import tqdm
-from collections import defaultdict
+# from collections import defaultdict
 from sklearn.utils import shuffle
 import torch
 from scipy import sparse
 from data_preprocess import prepare_org_data
 
 # 최초 한번만 실행
-def mat_to_csv(data_path:str, regen=False):
+def mat_to_csv(data_path:str, regen):
     rating_path = os.path.join(data_path,'rating.csv')
     trust_path = os.path.join(data_path,'trustnetwork.csv')
-    if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (not regen):
+    if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (regen!='all'):
         rating_df = pd.read_csv(rating_path)
         trust_df = pd.read_csv(trust_path)
     
@@ -108,14 +108,14 @@ def add_degree(rating_df, trust_df):
     return rating_df
 
 
-def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regen=False):
+def shuffle_and_split_dataset(data_path:str, test, seed, regen):
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
     valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
     # if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regen)):
-    if os.path.isfile(train_path) & os.path.isfile(test_path) & (not regen):
+    if os.path.isfile(train_path) & os.path.isfile(test_path) & (regen != 'all'):
         print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
         rating_valid_set = pd.read_csv(valid_path)
@@ -144,15 +144,14 @@ def shuffle_and_split_dataset(data_path:str, test=0.2, seed=42, regen=False):
     return rating_train_set, rating_valid_set, rating_test_set
     # return rating_train_set, rating_test_set
 
-def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame, trust_df, seed:int=42, regen=False):
+def generate_social_dataset(data_path, split, rating_split, trust_df, seed, regen):
     """
     Generate social graph from train/test/validation dataset
     """
     social_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
     rating_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
-    if (not os.path.isfile(social_file)) or regen:
+    if (not os.path.isfile(social_file)) or (regen=='all'):
         print(f"Creating Social {split} split sets...\n")
-        # trust_df = pd.read_csv(data_path + '/trustnetwork_org.csv', index_col=[]) # social interaction
         users = rating_split['user_id'].unique()            
         social_split = trust_df[(trust_df['user_id_1'].isin(users)) & (trust_df['user_id_2'].isin(users))]
 
@@ -166,7 +165,7 @@ def generate_social_dataset(data_path:str, split:str, rating_split:pd.DataFrame,
     
     return social_split, rating_split
 
-def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFrame, social_split:pd.DataFrame, walk_length:int=5, data_split_seed:int=42, split:str='train', regen:bool=False):
+def generate_social_random_walk_sequence(data_path, rating_split, social_split, walk_length, data_split_seed, split, regen):
     # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
@@ -203,9 +202,10 @@ def generate_social_random_walk_sequence(data_path:str, rating_split:pd.DataFram
     anchor_nodes = social_graph.nodes()
         
     # save dir 지정
+    # all, rw, total
     file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
     # 이미 random walk 존재하는 경우 return
-    if os.path.isfile(file_path)&(not regen):
+    if os.path.isfile(file_path) & (regen in ['no','total']):
         print(f"Loading {split} random walk sequence file...")
         df = pd.read_csv(file_path)
     # 새로 생성 or regen
@@ -298,7 +298,7 @@ def find_next_node(input_G, previous_node, current_node): # 확률적으로, anc
     return selected_node
 
 def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame, random_walk_valid:pd.DataFrame, random_walk_test:pd.DataFrame, train_path:str, valid_path:str, test_path:str, regen:bool):
-    if regen:
+    if regen in ['all','rw','total']:
         random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
         random_walk_train = random_walk_train[~random_walk_train['random_walk_seq'].isin(random_walk_valid['random_walk_seq'])]
         # random_walk_valid = random_walk_valid[~random_walk_valid['random_walk_seq'].isin(random_walk_test['random_walk_seq'])]
@@ -318,14 +318,14 @@ def union_user_item_dict(test_dict, valid_dict):
         test_dict[k] = list(set(v).union(set(test_dict.get(k,[]))))
     return test_dict   
     
-def generate_input_sequence_data(data_path, user_df:pd.DataFrame, rating_df:pd.DataFrame, seed:int, split:str, random_walk_len:int=30, item_per_user:int=5, regen:bool=False, used_pairs:dict={}):
+def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, random_walk_len, item_per_user, regen, used_pairs:dict={}):
 
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
     total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
 
     # total_df 재생성 여부 확인
-    if os.path.isfile(total_path)&(not regen):
+    if os.path.isfile(total_path)&(regen=='no'):
         print(f"{split} total df(input_sequence_data) already exists!")
         print(total_path)
         print(f"Loading {split} total df(input_sequence_data)...")
