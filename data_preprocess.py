@@ -14,7 +14,7 @@ def prepare_org_data(data, side_info=True):
         trust_mat = loadmat(os.path.join(data_dir, 'trustnetwork.mat'))
 
         rating_arr = rating_mat['rating'].astype(np.int64)
-        trust_arr = trust_mat['trust'].astype(np.int64)
+        trust_arr = trust_mat['trustnetwork'].astype(np.int64)
 
         rating_df = pd.DataFrame(rating_arr, columns=['user_id','product_id','category_id','rating','helpfullness','timestamp'])
         trust_df = pd.DataFrame(trust_arr, columns=['user_id_1','user_id_2'])
