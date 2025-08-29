@@ -11,11 +11,14 @@ import pynvml
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
+from collections import defaultdict
+
 import torch
 import torch.nn.functional as F
 # import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.tensorboard import SummaryWriter
 
 import data_making_2 as dm
@@ -47,7 +50,7 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
-
+        
 # calculate NDCG(row별로 계산 : 알고리즘은 동일)
 def NDCG(items, logits, ratings):
     items = torch.tensor(items)
@@ -75,6 +78,30 @@ def NDCG(items, logits, ratings):
     
     return ndcg
 
+def BPR(output_batch, rating_batch):
+    bpr_loss = 0.0
+    logits = output_batch[rating_batch==1]
+    logit_1 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==2]
+    logit_2 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==3]
+    logit_3 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==4]
+    logit_4 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    logits = output_batch[rating_batch==5]
+    logit_5 = logits.sum() if logits.numel()==0 else logits.mean()
+    
+    for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+        diff = pos-(neg+0.1)
+        loss = -F.logsigmoid(diff)
+        bpr_loss += loss
+        
+    return bpr_loss
+        
 
 def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_mae, best_ndcg, update_cnt):
     eval_losses = AverageMeter()
@@ -107,10 +134,9 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
             
             item_lst, rating_lst, output_lst = [],[],[]
             for i in range(batch['anchor_user'].size(0)):
-                mask = (batch['anchor_items'][i]!=0)
-                items = batch['anchor_items'][i][mask].data.cpu().tolist()
-                ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
-                outputs = rank_output[i][mask].data.cpu().tolist()
+                items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
+                outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
                 assert len(items)==len(ratings)==len(outputs)
                 item_lst.append(items)
                 rating_lst.append(ratings)
@@ -135,6 +161,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     total_mae /= (step+1)
             
     if ((1/total_rmse)*0.1+(total_ndcg)*0.9 > (1/best_rmse)*0.1+(best_ndcg)*0.9): 
+    # if (total_rmse < best_rmse) | (total_ndcg > best_ndcg): 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_mae = total_mae
@@ -185,17 +212,22 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                             dynamic_ncols=True,
                             leave=False)
         
+        
         for step, batch in enumerate(epoch_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
             rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
 
             rating_mask = (batch['item_rating'] != 0)            
-            org_loss = RMSE(rating_pred, batch['item_rating'], rating_mask)
+            org_loss = MSE(rating_pred, batch['item_rating'], rating_mask)
             org_losses.update(org_loss)
-            y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
-            rank_loss = RMSE(rank_output, y_rank_value)
+            # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
+            # rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_losses.update(rank_loss)
+            
             loss = org_loss + rank_loss
+            # loss = org_loss
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -223,7 +255,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         if epoch > 100:
             break
-        if update_cnt > 10: 
+        if update_cnt > 20: 
             break
     writer.close()
 
@@ -233,9 +265,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("total memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
     print(torch.cuda.memory_summary(device=device.index))
-
-
-def eval(model, ds_iter):
+    
+def eval2(model, ds_iter):
     model.eval()
     if device.type=='cuda':
         start = torch.cuda.Event(enable_timing=True)
@@ -298,7 +329,7 @@ def eval(model, ds_iter):
     total_rmse /= (step+1)
     total_mae /= (step+1)           
     
-    output_df.to_csv(f'eval_output_{args.dataset}.csv')
+    output_df.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}.csv')
         
     if device.type=='cuda':
         end.record(stream)
@@ -318,8 +349,10 @@ def get_args():
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
     parser.add_argument("--device", type=str, default='single')
     parser.add_argument("--id", type=int, default=0)
-    parser.add_argument("--eval", type = bool, default=False, help="train eval")
-    parser.add_argument("--checkpoint", type = str, default="test", help="load ./checkpoints/model_name.model to evaluation")
+    parser.add_argument("--eval", type = bool, default=False,
+                        help="train eval")
+    parser.add_argument("--checkpoint", type = str, default="test",
+                        help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
     parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
@@ -477,7 +510,7 @@ def main():
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr = training_config["learning_rate"], weight_decay=0.1)
+        lr = training_config["learning_rate"])
 
     training_config["num_train_steps"] = len(ds_iter['train'])
 
@@ -506,7 +539,7 @@ def main():
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint["model_state_dict"])
         print("loading the best model from: " + checkpoint_path)
-        eval(model, ds_iter)
+        eval2(model, ds_iter)
 
     torch.cuda.empty_cache()
 

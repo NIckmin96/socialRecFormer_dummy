@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 from models.blocks.encoder_layer import EncoderLayer
@@ -45,12 +46,6 @@ class Encoder(nn.Module):
                 dropout = dropout
             ) for _ in range(num_layers)]
         )
-
-        # self.spatial_pos_bias = SpatialEncoder(
-        #     # num_nodes = self.num_user,
-        #     max_spd_value = self.max_spd_value,
-        #     num_heads = num_heads
-        # )
     
     def forward(self, batched_data):
         x = self.input_embed(batched_data['user_seq'], batched_data['user_degree'])

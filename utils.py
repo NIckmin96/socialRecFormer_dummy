@@ -106,28 +106,52 @@ class RankMetric:
         self.k=k
         self.bs = len(items)
         self.device = items.device
+        self.items = items
+        self.logits = logits
+        self.explicit = explicit
+        self.implicit = implicit
         # logit을 기준으로 top-k indicies 추출
-        logit_indices = logits.argsort(descending=True).to('cpu').numpy()[:,:k].copy()
-        logit_indices = torch.tensor(logit_indices, device=self.device)
+        _, self.logit_indices = torch.topk(logits, k)
+        self.logit_indices = self.logit_indices.to(self.device)
+
         # ideal indices
-        ideal_indices = explicit.argsort(descending=True).to('cpu').numpy()[:,:k].copy()
-        ideal_indices = torch.tensor(ideal_indices, device=self.device)
+        _, self.ideal_indices = torch.topk(explicit, k)
+        self.ideal_indices = self.ideal_indices.to(self.device)
+
         # top-k recommended items
-        self.recommended_k = torch.gather(input=items, dim=1, index=logit_indices)
+        self.recommended_k = torch.gather(input=items, dim=-1, index=self.logit_indices)
+        # prediction mask(implicit=0이지만, 추천된 경우 filter)
+        rec_mask = torch.gather(input=implicit, dim=-1, index=self.logit_indices)
         # top-k recommended items' ratings
-        self.recommended_k_rating = torch.gather(input=explicit, dim=1, index=logit_indices)
+        self.recommended_k_rating = torch.gather(input=explicit, dim=-1, index=self.logit_indices)*rec_mask
+        
         # ideal top-k items
-        self.ideal_k = torch.gather(input=items,dim=1,index=ideal_indices)
+        self.ideal_k = torch.gather(input=items, dim=-1, index=self.ideal_indices)
+        # ideal top-k mask
+        self.mask = torch.gather(input=implicit, dim=-1, index=self.ideal_indices)
         # top-k ideal items' ratings
-        self.ideal_k_rating = torch.sort(explicit, descending=True, dim=-1)[0][:,:self.k]
+        self.ideal_k_rating = torch.gather(input=explicit, dim=-1, index=self.ideal_indices)*self.mask # mask끼면 IDCG값이 낮아져서 NDCG가 조금 높아지긴함
+        # self.ideal_k_rating = torch.gather(input=explicit, dim=-1, index=self.ideal_indices)
+
         # implicit feedback이 1인 unique item list
         self.liked = (items*(implicit==1)).unique(dim=1)
         # intersection
-        self.inter = [set(self.recommended_k[i].tolist()).intersection(set(self.liked[i].tolist())) for i in range(self.bs)]
-        # print(self.recommended_k[:10])
-        # print(self.recommended_k_rating[:10])
-        # print(self.ideal_k[:10])
-        # print(self.ideal_k_rating[:10])
+        self.inter = [set(self.recommended_k[i].tolist()).intersection(set(self.liked[i].tolist()))-set([0]) for i in range(self.bs)]
+
+    def NDCG(self):
+        eps = 1e-10
+        discount = torch.log2(torch.arange(self.k)+2).to(self.device)
+        DCG = torch.sum(self.recommended_k_rating/discount, dim=-1)
+        # print(DCG)
+        IDCG = torch.sum(self.ideal_k_rating/discount, dim=-1)
+        # print(IDCG)
+        NDCG = DCG/(IDCG+eps)
+        # print(NDCG)
+        NDCG = NDCG/(torch.sum(self.mask, dim=-1)+eps)
+        # print(NDCG)
+        NDCG = torch.mean(NDCG)
+
+        return NDCG
 
     def precision(self):
         total_precision = 0.0
@@ -141,36 +165,7 @@ class RankMetric:
         for i in range(self.bs):
             total_recall+=(len(self.inter[i])/len(self.liked[i]))
         total_recall/=(i+1)
-        return total_recall
-    
-    # relevance를 explicit rating으로 설정(graded relevance)
-    def NDCG(self):
-        # DCG
-        DCG = 0.0
-        for i in range(self.bs):
-            for j,item in enumerate(self.recommended_k[i]):
-                item = item.item()
-                if item in self.inter[i]:
-                    rel = self.recommended_k_rating[i][j].item()
-                    rel = rel/np.log2(j+2)
-                else:
-                    rel = 0
-                DCG+=rel    
-            # DCG/=(j+1)
-        DCG/=(i+1)
-        # IDCG
-        IDCG = 0.0
-        for i in range(self.bs):
-            for j,rel in enumerate(self.ideal_k_rating[i]):
-                rel = rel.item()
-                rel = rel/np.log2(j+2)
-                IDCG+=rel
-            # IDCG/=(j+1)
-        IDCG/=(i+1)
-        
-        return DCG/IDCG
-
-
+        return total_recall        
 
 ##############################################################################
 # REDIRECT LOGGER #

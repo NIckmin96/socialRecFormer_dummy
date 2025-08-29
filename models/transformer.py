@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from models.encoder import Encoder
 from models.decoder import Decoder
@@ -8,6 +9,7 @@ class Transformer(nn.Module):
     # def __init__(self, num_user, max_degree_user, num_item, max_degree_item, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec):
     def __init__(self, num_user, max_user_degree, max_spd_value, num_item, max_item_degree, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec, n_experts, topk, rating_thres, args):
         super(Transformer, self).__init__()
+
 
         self.encoder = Encoder(
             num_user=num_user,

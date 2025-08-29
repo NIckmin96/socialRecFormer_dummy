@@ -59,19 +59,12 @@ class DecoderLayer(nn.Module):
         rmse_loss = 0
         rating_pred = None
         
-        # 1-1. Self-Attention
+        # 1. Self-Attention
         residual = x_item
         x_item = self.norm_self(x_item)
         x, _ = self.attention(Q=x_item, K=x_item, V=x_item, mask=self_attn_mask, attn_bias=None)
         x = self.dropout_self(x)
         x = x + residual
-        
-        # # 1-2. FFN
-        # residual = x
-        # x = self.norm_self_fc(x)
-        # x = self.moe(x)
-        # x = self.dropout_self_fc(x)
-        # x = x + residual
         
         # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
         residual = x
@@ -83,7 +76,6 @@ class DecoderLayer(nn.Module):
         x = x + residual
         
         if self.last_layer_flag:
-            # 7. last layer returns predicted ratings.
             x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
             
         # 2-2. FFN
@@ -95,12 +87,11 @@ class DecoderLayer(nn.Module):
         
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
         residual = x
-        x = x + x_anchor_i # user-item representation + anchor user기준 item embeddings
+        x = x + x_anchor_i # [TODO] Concatenation으로 변경해서 실험
         x = self.norm_cross2(x)
-        new_enc_output = enc_output + x_anchor.expand(-1,enc_output.size(1),-1)
+        new_enc_output = enc_output + x_anchor.expand(-1,enc_output.size(1),-1) # [TODO] Concatenation으로 변경해서 실험
         x, _ = self.cross_attention2(Q=x, K=new_enc_output, V=new_enc_output, mask=cross_attn_mask_2, attn_bias=None)
         # Ranking loss(BCE)
-        # bce_loss = F.binary_cross_entropy_with_logits(torch.mean(x, dim=-1).float(), ranking_bias.float(), reduction='mean')
         x = self.dropout_cross2(x)
         x = x + residual
     

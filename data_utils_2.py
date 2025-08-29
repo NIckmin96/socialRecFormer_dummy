@@ -18,7 +18,7 @@ from scipy import sparse
 from data_preprocess import prepare_org_data
 
 # 최초 한번만 실행
-def mat_to_csv(data_path:str, regen):
+def mat_to_csv(data_path:str, regen=False):
     rating_path = os.path.join(data_path,'rating.csv')
     trust_path = os.path.join(data_path,'trustnetwork.csv')
     if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (regen!='all'):
