@@ -89,7 +89,7 @@ epinions={
             "max_user_degree": 2026,
             "max_item_degree": 1155,
             "max_spd_value": 15,
-            "d_model": 56,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
@@ -124,7 +124,7 @@ yelp={
             "max_user_degree": 4118,
             "max_item_degree": 717,
             "max_spd_value": 15,
-            "d_model": 32,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)

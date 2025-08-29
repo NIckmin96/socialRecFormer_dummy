@@ -92,18 +92,18 @@ class Decoder(nn.Module):
         rmse_losses = []
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
-            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, None, None)
+            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias=None, ranking_bias=None)
             rmse_losses.append(rmse_loss)
         
         # Pass to prediction layer
-        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, None, None)
+        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias=None, ranking_bias=None)
         rmse_losses.append(rmse_loss)
         
         # [bs, i, d] => [bs, i]
-        output = torch.mean(output, dim=-1)
-        # rank_logits = F.sigmoid(output)
+        rank_output = torch.mean(output, dim=-1)
+        # rank_output = F.sigmoid(output)
         # rank_logits = F.softmax(output, dim=-1)
 
         del self_attn_mask, cross_attn_mask_1, cross_attn_mask_2
 
-        return output, rating_pred, sum(rmse_losses)/len(rmse_losses)
+        return rank_output, rating_pred, sum(rmse_losses)/len(rmse_losses)

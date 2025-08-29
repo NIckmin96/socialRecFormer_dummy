@@ -11,7 +11,7 @@ import pandas as pd
 from ast import literal_eval    # convert str type list to original type
 from scipy.io import loadmat
 from tqdm.auto import tqdm
-# from collections import defaultdict
+from collections import defaultdict
 from sklearn.utils import shuffle
 import torch
 from scipy import sparse
@@ -187,22 +187,19 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
     ######################################
     
     # rating split기준 실험
-    # rating_users = rating_split.user_id.unique()
-    # user_counts = rating_split['user_id'].value_counts()
-    # per_user = user_counts.quantile(0.25)
-    # if data_path.split('/')[-1] in ['yelp']:
-    #     per_user = 1
+    rating_users = rating_split.user_id.unique()
+    user_counts = rating_split['user_id'].value_counts()
+    per_user = user_counts.quantile(0.25)
+    if data_path.split('/')[-1] in ['yelp']:
+        per_user = 1
         
-    # print("per user : ", per_user)
+    print("per user : ", per_user)
     
-    # for user,cnt in user_counts.items():
-    #     k = int(min(per_user, cnt))
-    #     anchor_nodes.extend([user]*k)
-
-    anchor_nodes = social_graph.nodes()
+    for user,cnt in user_counts.items():
+        k = int(min(per_user, cnt))
+        anchor_nodes.extend([user]*k)
         
     # save dir 지정
-    # all, rw, total
     file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path) & (regen in ['no','total']):
@@ -212,15 +209,15 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
     else:
         user_degree_dic = rating_split.groupby('user_id')['user_degree'].unique().map(lambda x:int(x[0])).to_dict()
         # random walk sequence
-        # anchor_cnt = {n:0 for n in rating_users}
+        anchor_cnt = {n:0 for n in rating_users}
         
         anchor_seq_degree = []
         # seq_set = set()
         print(f"{split} random walk sequence file doesn't exist!")
         print(f"Creating {split} random walk sequence...")
         for node in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
-            # if anchor_cnt[node]==per_user:
-            #     continue
+            if anchor_cnt[node]==per_user:
+                continue
             seqs = [node]
             wl = 1
             thres=0
@@ -247,7 +244,7 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
                 seqs.append(next_node)
                 wl += 1
             
-            # anchor_cnt[node]+=1
+            anchor_cnt[node]+=1
             degrees = [0 if node==0 else user_degree_dic.get(node, 0) for node in seqs]
             anchor_seq_degree.append([node,seqs,degrees])
 
