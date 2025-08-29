@@ -219,7 +219,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
 
             rating_mask = (batch['item_rating'] != 0)            
-            org_loss = RMSE(rating_pred, batch['item_rating'], rating_mask)
+            org_loss = MSE(rating_pred, batch['item_rating'], rating_mask)
             org_losses.update(org_loss)
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
@@ -329,7 +329,7 @@ def eval2(model, ds_iter):
     total_rmse /= (step+1)
     total_mae /= (step+1)           
     
-    output_df.to_csv(f'eval_output_{args.dataset}.csv')
+    output_df.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}.csv')
         
     if device.type=='cuda':
         end.record(stream)
