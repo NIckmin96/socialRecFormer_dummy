@@ -221,8 +221,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             rating_mask = (batch['item_rating'] != 0)            
             org_loss = MSE(rating_pred, batch['item_rating'], rating_mask)
             org_losses.update(org_loss)
+            # rank_logits = F.softmax(rank_output, dim=-1).float()
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
-            # rank_loss = RMSE(rank_output, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            # rank_loss = RMSE(rank_logits, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_losses.update(rank_loss)
             
@@ -255,7 +256,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         if epoch > 100:
             break
-        if update_cnt > 20: 
+        if update_cnt > 30: 
             break
     writer.close()
 
@@ -367,7 +368,6 @@ def get_args():
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
-    parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="Whether regen dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
     
@@ -427,13 +427,13 @@ def main():
     model_config["max_user_degree"] = data_making.max_user_degree
     model_config["max_item_degree"] = data_making.max_item_degree
     # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    model_config["num_layers_enc"] = args.num_layers_enc + int(math.log(args.augs,2))
-    model_config["num_layers_dec"] = args.num_layers_dec + int(math.log(args.augs,2))
+    model_config["num_layers_enc"] = args.num_layers_enc
+    model_config["num_layers_dec"] = args.num_layers_dec
     
     # model expansion (2) : MoE topk router
     model_config["n_experts"] = args.n_experts
     # model expansion (2)-2 : MoE topk # of experts
-    model_config["topk"] = args.topk + int(math.log(args.augs,2))
+    model_config["topk"] = args.topk
     
     # model expansion (3) : rating threshold for ranking task
     model_config["rating_thres"] = args.rating_thres
@@ -464,9 +464,6 @@ def main():
     checkpoint_dir = checkpoint_data + f'checkpoints_seed_{args.seed}/'
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-    checkpoint_dir = os.path.join(checkpoint_dir, "train")
-    if not os.path.exists(checkpoint_dir):
-        os.makedirs(checkpoint_dir)
     
     name_dataset = str(args.dataset)
     name_seed = str(args.seed)
@@ -474,9 +471,7 @@ def main():
     name_i_len = str(args.user_seq_len*args.item_per_user)
     name_n_enc = str(model_config['num_layers_enc'])
     name_n_dec = str(model_config['num_layers_dec'])
-    name_train_augs = str(args.augs)
-    name_test_augs = str(str(min(3,args.augs)) if args.augs else '')
-    args.name = '_'.join([name_dataset, name_seed, name_u_len, name_i_len, name_n_enc, name_n_dec, name_train_augs, name_test_augs])
+    args.name = '_'.join([name_dataset, name_seed, name_u_len, name_i_len, name_n_enc, name_n_dec])
     checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
