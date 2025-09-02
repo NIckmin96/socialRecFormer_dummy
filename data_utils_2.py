@@ -169,40 +169,10 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
     # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
-    anchor_nodes = []
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
-    
-    ####### train=75% / 나머지 = 1번 #######
-    # if split=='train':
-    #     rating_users = rating_split.user_id.unique()
-    #     user_counts = rating_split['user_id'].value_counts()
-    #     per_user = user_counts.quantile(0.25)
-    #     if data_path.split('/')[-1] in ['yelp']:
-    #         per_user = 1
-    
-    # else:
-    #     per_user=1
-    #     rating_users = social_graph.nodes()
-    #     user_counts = {user:per_user for user in social_graph.nodes()}
-    ######################################
-    
-    # rating split기준 실험
-    # rating_users = rating_split.user_id.unique()
-    # user_counts = rating_split['user_id'].value_counts()
-    # per_user = user_counts.quantile(0.25)
-    # if data_path.split('/')[-1] in ['yelp']:
-    #     per_user = 1
-        
-    # print("per user : ", per_user)
-    
-    # for user,cnt in user_counts.items():
-    #     k = int(min(per_user, cnt))
-    #     anchor_nodes.extend([user]*k)
-
     anchor_nodes = social_graph.nodes()
         
     # save dir 지정
-    # all, rw, total
     file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path) & (regen in ['no','total']):

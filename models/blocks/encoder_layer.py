@@ -15,7 +15,8 @@ class EncoderLayer(nn.Module):
         self.dropout1 = nn.Dropout(p=dropout)
         self.norm1 = nn.LayerNorm(d_model)
 
-        self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
+        # self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
+        self.ffn = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.dropout2 = nn.Dropout(p=dropout)
         self.norm2 = nn.LayerNorm(d_model)
     
@@ -31,7 +32,7 @@ class EncoderLayer(nn.Module):
         # 3. FFN
         residual = x
         x = self.norm2(x)
-        x = self.moe(x)
+        x = self.ffn(x)
         # Add & Norm
         x = self.dropout2(x)
         x = x + residual
