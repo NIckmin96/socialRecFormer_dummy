@@ -322,7 +322,7 @@ def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, ran
 
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
-    total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
+    total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(regen=='no'):
