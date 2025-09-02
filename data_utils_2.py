@@ -173,7 +173,7 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
     anchor_nodes = social_graph.nodes()
         
     # save dir 지정
-    file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
+    file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path) & (regen in ['no','total']):
         print(f"Loading {split} random walk sequence file...")
