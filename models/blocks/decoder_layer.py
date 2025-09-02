@@ -39,7 +39,7 @@ class DecoderLayer(nn.Module):
 
         # prediction layer
         self.last_attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, last_layer_flag=True, is_dec_layer=self.dec_layer, is_rating=True)
-        # self.last_activation = nn.LeakyReLU(d_model)
+        self.last_activation = nn.LeakyReLU()
         
         # Cross Attention(2) : anchor user - item sequences 간의 aggregation
         self.norm_cross2 = nn.LayerNorm(d_model)
@@ -90,7 +90,7 @@ class DecoderLayer(nn.Module):
 
         if self.last_layer_flag:
             x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
-            # rating_pred = self.last_activation(rating_pred)
+            rating_pred = self.last_activation(rating_pred)
 
         
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
