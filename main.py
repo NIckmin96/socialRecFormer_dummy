@@ -222,9 +222,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             org_loss = RMSE(rating_pred, batch['item_rating'], rating_mask)
             org_losses.update(org_loss)
             y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
-            rank_logits = F.softmax(rank_output, dim=-1)
-            rank_loss = RMSE(rank_logits, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            # rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            # rank_logits = F.softmax(rank_output, dim=-1)
+            # rank_loss = RMSE(rank_logits, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_losses.update(rank_loss)
             
             loss = org_loss + rank_loss
