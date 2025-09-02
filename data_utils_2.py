@@ -18,7 +18,7 @@ from scipy import sparse
 from data_preprocess import prepare_org_data
 
 # 최초 한번만 실행
-def mat_to_csv(data_path:str, regen=False):
+def mat_to_csv(data_path:str, regen):
     rating_path = os.path.join(data_path,'rating.csv')
     trust_path = os.path.join(data_path,'trustnetwork.csv')
     if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (regen!='all'):
@@ -32,7 +32,7 @@ def mat_to_csv(data_path:str, regen=False):
         # original csv file
         rating_org = os.path.join(data_path, 'rating_org.csv')
         trust_org = os.path.join(data_path, 'trustnetwork_org.csv')
-        if os.path.isfile(rating_org) & os.path.isfile(trust_org):
+        if os.path.isfile(rating_org) & os.path.isfile(trust_org) & (regen):
             rating_df = pd.read_csv(rating_org)
             trust_df = pd.read_csv(trust_org)
         else:
@@ -165,45 +165,18 @@ def generate_social_dataset(data_path, split, rating_split, trust_df, seed, rege
     
     return social_split, rating_split
 
-def generate_social_random_walk_sequence(data_path, rating_split, social_split, walk_length, data_split_seed, split, regen):
+def generate_social_random_walk_sequence(data_path, rating_split, social_split, walk_length, data_split_seed, split, augs, regen):
     # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
-    anchor_nodes = []
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
-    
-    ####### train=75% / 나머지 = 1번 #######
-    # if split=='train':
-    #     rating_users = rating_split.user_id.unique()
-    #     user_counts = rating_split['user_id'].value_counts()
-    #     per_user = user_counts.quantile(0.25)
-    #     if data_path.split('/')[-1] in ['yelp']:
-    #         per_user = 1
-    
-    # else:
-    #     per_user=1
-    #     rating_users = social_graph.nodes()
-    #     user_counts = {user:per_user for user in social_graph.nodes()}
-    ######################################
-    
-    # rating split기준 실험
-    # rating_users = rating_split.user_id.unique()
-    # user_counts = rating_split['user_id'].value_counts()
-    # per_user = user_counts.quantile(0.25)
-    # if data_path.split('/')[-1] in ['yelp']:
-    #     per_user = 1
-        
-    # print("per user : ", per_user)
-    
-    # for user,cnt in user_counts.items():
-    #     k = int(min(per_user, cnt))
-    #     anchor_nodes.extend([user]*k)
-
-    anchor_nodes = social_graph.nodes()
+    anchor_nodes = list(social_graph.nodes())*augs
         
     # save dir 지정
-    # all, rw, total
-    file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
+    if split=='train':
+        file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}_{augs}.csv")
+    else:
+        file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path) & (regen in ['no','total']):
         print(f"Loading {split} random walk sequence file...")
@@ -318,11 +291,14 @@ def union_user_item_dict(test_dict, valid_dict):
         test_dict[k] = list(set(v).union(set(test_dict.get(k,[]))))
     return test_dict   
     
-def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, random_walk_len, item_per_user, regen, used_pairs:dict={}):
+def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, random_walk_len, item_per_user, augs, regen, used_pairs:dict={}):
 
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
-    total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
+    if split=='train':
+        total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}_{augs}.pkl"
+    else:
+        total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(regen=='no'):
