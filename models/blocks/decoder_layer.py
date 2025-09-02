@@ -37,8 +37,10 @@ class DecoderLayer(nn.Module):
         self.norm_cross1_ffn = nn.LayerNorm(d_model)
         self.ffn_cross_1 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.dropout_cross1_ffn = nn.Dropout(p=dropout)
-        
-            
+        # prediction layer
+        self.last_attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, last_layer_flag=True, is_dec_layer=self.dec_layer, is_rating=True)
+        self.last_activation = nn.LeakyReLU()
+
         # Cross Attention(2) : anchor user - item sequences 간의 aggregation
         self.norm_cross2 = nn.LayerNorm(d_model)
         self.cross_attention2 = MultiHeadAttention(d_model=d_model, num_heads=num_heads, is_dec_layer=self.dec_layer, is_rating=False)
@@ -48,9 +50,7 @@ class DecoderLayer(nn.Module):
         self.ffn_cross_2 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.dropout_cross2_ffn = nn.Dropout(p=dropout)
         
-        # prediction layer
-        self.last_attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, last_layer_flag=True, is_dec_layer=self.dec_layer, is_rating=True)
-        self.activation = nn.LeakyReLU(d_model)
+        self.activation = nn.LeakyReLU()
 
     def forward(self, x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias):
         # tmp
@@ -78,9 +78,6 @@ class DecoderLayer(nn.Module):
         x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
         x = self.dropout_cross1(x)
         x = x + residual
-        
-        if self.last_layer_flag:
-            x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
             
         # 2-2. FFN
         residual = x
@@ -89,6 +86,9 @@ class DecoderLayer(nn.Module):
         x = self.dropout_cross1_ffn(x)
         x = x + residual
         
+        if self.last_layer_flag:
+            x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
+            rating_pred = self.last_activation(rating_pred)
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
         residual = x
         x = x + x_anchor_i # [TODO] Concatenation으로 변경해서 실험
