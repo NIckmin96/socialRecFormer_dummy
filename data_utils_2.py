@@ -52,6 +52,14 @@ def mat_to_csv(data_path:str, regen):
             rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
             # trust를 기준으로 user를 sampling
             trust_df = trust_df.sample(15000000, random_state=42, replace=False)
+
+        print(f"***** Original Dataset Statistics *****")
+        print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())}")
+        print(f"# of users in rating df : {rating_df.user_id.nunique()}")
+        assert rating_df.product_id.nunique()==rating_df.product_id.max()
+        print(f"# of items : {rating_df.product_id.nunique()}")
+        print(f"# of interactions : {rating_df.shape[0]}")
+        print(f"# of Social Links : {trust_df.shape[0]}")
             
         rating_df, trust_df = reset_and_filter_data(rating_df, trust_df)
         rating_df = add_degree(rating_df, trust_df)
@@ -81,6 +89,10 @@ def mat_to_csv(data_path:str, regen):
 
 def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.DataFrame:   
     # filter data by users(existing in both columns in trust_df)
+    total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
+    rating_df = rating_df[rating_df.user_id.isin(total_users)]
+    trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
+    # filter again
     total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
     trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]

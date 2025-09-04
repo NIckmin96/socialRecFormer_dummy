@@ -14,7 +14,7 @@ def prepare_org_data(data, side_info=True):
         trust_mat = loadmat(os.path.join(data_dir, 'trustnetwork.mat'))
 
         rating_arr = rating_mat['rating'].astype(np.int64)
-        trust_arr = trust_mat['trust'].astype(np.int64)
+        trust_arr = trust_mat['trustnetwork'].astype(np.int64)
 
         rating_df = pd.DataFrame(rating_arr, columns=['user_id','product_id','category_id','rating','helpfullness','timestamp'])
         trust_df = pd.DataFrame(trust_arr, columns=['user_id_1','user_id_2'])
@@ -122,8 +122,8 @@ def prepare_org_data(data, side_info=True):
         trust_df = trust_df.drop(columns='Weight')
         
     # save dataframe to csv
-    rating_df.to_csv(os.path.join(data_dir, 'rating_org.csv'), index=False)
-    trust_df.to_csv(os.path.join(data_dir, 'trustnetwork_org.csv'), index=False)
+    rating_df.to_csv(os.path.join(os.path.join(*data_dir.split('/')[:-1]), 'rating_org.csv'), index=False)
+    trust_df.to_csv(os.path.join(os.path.join(*data_dir.split('/')[:-1]), 'trustnetwork_org.csv'), index=False)
     
     print("###### Data Source Processed ######")
     print(f"Num of users : {rating_df.user_id.nunique()}")
