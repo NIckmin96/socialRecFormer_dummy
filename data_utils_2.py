@@ -18,7 +18,7 @@ from scipy import sparse
 from data_preprocess import prepare_org_data
 
 # 최초 한번만 실행
-def mat_to_csv(data_path:str, regen):
+def mat_to_csv(data_path:str, regen=False):
     rating_path = os.path.join(data_path,'rating.csv')
     trust_path = os.path.join(data_path,'trustnetwork.csv')
     if os.path.isfile(rating_path) & os.path.isfile(trust_path) & (regen!='all'):
@@ -215,7 +215,7 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
         
     # save dir 지정
     # all, rw, total
-    file_path = os.path.join(data_path, f"new_rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
+    file_path = os.path.join(data_path, f"rw_rating_length_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
     # 이미 random walk 존재하는 경우 return
     if os.path.isfile(file_path) & (regen in ['no','total']):
         print(f"Loading {split} random walk sequence file...")
@@ -334,7 +334,7 @@ def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, ran
 
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
-    total_path = data_path + f"/new_sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
+    total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(regen=='no'):
