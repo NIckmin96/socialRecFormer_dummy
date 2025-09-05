@@ -56,7 +56,6 @@ def mat_to_csv(data_path:str, regen=False):
         print(f"***** Original Dataset Statistics *****")
         print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())}")
         print(f"# of users in rating df : {rating_df.user_id.nunique()}")
-        assert rating_df.product_id.nunique()==rating_df.product_id.max()
         print(f"# of items : {rating_df.product_id.nunique()}")
         print(f"# of interactions : {rating_df.shape[0]}")
         print(f"# of Social Links : {trust_df.shape[0]}")

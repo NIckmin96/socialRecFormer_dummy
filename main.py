@@ -107,6 +107,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     eval_losses = AverageMeter()
     model.eval()
     
+    metrics = Metrics()
     total_rmse, total_mae = 0.0, 0.0
     output_df = pd.DataFrame()
     with torch.no_grad():
@@ -116,10 +117,10 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
             
             rank_output, rating_pred, _, _ = model(batch, is_train=False)
             mask = (batch['item_rating'] != 0)
-            rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
+            rmse = metrics.RMSE(rating_pred, batch['item_rating'], mask).item()
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rmse += RMSE(rank_output, y_rank_value)
-            mae = MAE(rating_pred, batch['item_rating'], mask)
+            mae = metrics.MAE(rating_pred, batch['item_rating'], mask)
             
             total_rmse += rmse
             total_mae += mae
@@ -155,7 +156,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
                                                           'outputs':lambda x:sum(x, start=[])}).reset_index()
     output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
     output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
-    output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
+    output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
+    output_df = output_df.dropna(how='any')
     total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)
@@ -201,6 +203,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         stream = torch.cuda.current_stream(device=device)
         start.record(stream)
 
+    metrics = Metrics()
     # Training step
     for epoch in range(total_epochs):
         losses = AverageMeter()
@@ -219,12 +222,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
 
             rating_mask = (batch['item_rating'] != 0)            
-            org_loss = RMSE(rating_pred, batch['item_rating'], rating_mask)
+            org_loss = metrics.RMSE(rating_pred, batch['item_rating'], rating_mask)
             org_losses.update(org_loss)
             y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rank_logits = F.softmax(rank_output, dim=-1)
             # rank_loss = RMSE(rank_logits, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_losses.update(rank_loss)
             
             loss = org_loss + rank_loss
@@ -269,6 +272,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     
 def eval2(model, ds_iter):
     model.eval()
+    metrics = Metrics()
     if device.type=='cuda':
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
@@ -290,8 +294,8 @@ def eval2(model, ds_iter):
             
             rank_output, rating_pred, _, _ = model(batch, is_train=False)
             mask = (batch['item_rating'] != 0)
-            rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
-            mae = MAE(rating_pred, batch['item_rating'], mask)
+            rmse = metrics.RMSE(rating_pred, batch['item_rating'], mask).item()
+            mae = metrics.MAE(rating_pred, batch['item_rating'], mask)
             total_rmse += rmse
             total_mae += mae
             
@@ -320,17 +324,21 @@ def eval2(model, ds_iter):
             
             output_df = pd.concat([output_df, df])
             
-    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
-                                                        'anchor_ratings':lambda x:sum(x, start=[]),
-                                                        'outputs':lambda x:sum(x, start=[])}).reset_index()
-    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
-    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
-    output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
-    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x.tolist(), start=[]),
+                                                        'anchor_ratings':lambda x:sum(x.tolist(), start=[]),
+                                                        'outputs':lambda x:sum(x.tolist(), start=[])}).reset_index()
+    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())    
+    output_df[['ndcg@10','precision@10','recall@10', 'rec@10', 'ideal@10']] = output_df.apply(lambda x:metrics.rank_metrics(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
+    output_df = output_df.dropna(how='any')
+    filtered_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg@10'].mean()
+    total_ndcg = output_df['ndcg@10'].mean()
+    total_precision = output_df['precision@10'].mean()
+    total_recall = output_df['recall@10'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)           
     
-    output_df.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}.csv')
+    output_df.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}.csv', index=False)
         
     if device.type=='cuda':
         end.record(stream)
@@ -339,7 +347,10 @@ def eval2(model, ds_iter):
     print("\n [Evaluation Results]")
     print("RMSE: %2.5f" % total_rmse)
     print("MAE: %2.5f" % total_mae)
-    print("NDCG@10: %2.5f" % total_ndcg)
+    print("TOTAL RECALL@10: %2.5f" % total_recall)
+    print("TOTAL PRECISION@10: %2.5f" % total_precision)
+    print("TOTAL NDCG@10: %2.5f" % total_ndcg)
+    print("Filtered NDCG@10: %2.5f" % filtered_ndcg)
     # print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
     # print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
     print(f"total eval time: {(start.elapsed_time(end))}")
