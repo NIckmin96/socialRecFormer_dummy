@@ -84,6 +84,15 @@ class CosineAnnealingWarmUpRestarts(_LRScheduler):
 # Loss / Metrics #
 ##############################################################################
 
+def filter_negs(x):
+    mask = (torch.tensor(x['anchor_ratings'])!=0)
+    items = torch.tensor(x['anchor_items'])
+    items = items[mask].tolist()
+    outputs = torch.tensor(x['outputs'])[mask].tolist()
+    ratings = torch.tensor(x['anchor_ratings'])[mask].tolist()
+    
+    return pd.Series({'anchor_user':x['anchor_user'], 'anchor_items':items, 'outputs':outputs,'anchor_ratings':ratings})
+
 class Metrics:
     def MAE(self, pred, y, mask=None):
         if mask==None:
@@ -103,8 +112,13 @@ class Metrics:
 
         return torch.sqrt(self.MSE(pred, y, mask))
     
-    def BPR(self, output_batch, rating_batch):
+    def BPR(self, output_batch, rating_batch, neg):
         bpr_loss = 0.0
+        
+        if neg:
+            logits = output_batch[rating_batch==0]
+            logit_0 = logits.sum() if logits.numel()==0 else logits.mean()
+        
         logits = output_batch[rating_batch==1]
         logit_1 = logits.sum() if logits.numel()==0 else logits.mean()
         
@@ -120,10 +134,17 @@ class Metrics:
         logits = output_batch[rating_batch==5]
         logit_5 = logits.sum() if logits.numel()==0 else logits.mean()
         
-        for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
-            diff = pos-(neg+0.1)
-            loss = -F.logsigmoid(diff)
-            bpr_loss += loss
+        if neg:
+            for neg,pos in [(logit_0, logit_1), (logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+                diff = pos-(neg+2)
+                loss = -F.logsigmoid(diff)
+                bpr_loss += loss
+        
+        else:
+            for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+                diff = pos-(neg+2)
+                loss = -F.logsigmoid(diff)
+                bpr_loss += loss
             
         return bpr_loss
     
@@ -131,17 +152,17 @@ class Metrics:
         items = torch.tensor(items)
         logits = torch.tensor(logits)
         ratings = torch.tensor(ratings)
-        new_k = min((items!=0).sum().item(), k)
+        new_k = min(len(items.tolist()), k)
         if new_k==0:
             return None
         # ideal
         _,ideal_idx = torch.topk(ratings, new_k)
-        ideal_items = torch.gather(items, -1, ideal_idx)
-        ideal_ratings = torch.gather(ratings, -1, ideal_idx)
+        ideal_items = items[ideal_idx]
+        ideal_ratings = ratings[ideal_idx] 
         # recommended
         _,rec_idx = torch.topk(logits, new_k)
-        rec_items  = torch.gather(items,-1,rec_idx)
-        rec_ratings = torch.gather(ratings,-1,rec_idx)
+        rec_items = items[rec_idx]
+        rec_ratings = ratings[rec_idx]
         # mask (ideal에 존재하는지 여부)
         rowA = rec_items.unsqueeze(1)
         rowB = ideal_items.unsqueeze(0)
@@ -155,22 +176,28 @@ class Metrics:
         # 보정
         ndcg*=(new_k/k)
         return ndcg
-
-    def rank_metrics(self, items, logits, ratings, k):
-        items = torch.tensor(items)
-        logits = torch.tensor(logits)
-        ratings = torch.tensor(ratings)
-        new_k = min((items!=0).sum().item(), k)
+        
+    def rank_metrics(self, x, k):
+        user = x['anchor_user']
+        items = torch.tensor(x['anchor_items'])
+        ratings = torch.tensor(x['anchor_ratings'])
+        logits = torch.tensor(x['logits'])
+        new_k = min(len(items.tolist()), k)
         if new_k==0:
             return None, None, None, None, None
         # ideal
         _,ideal_idx = torch.topk(ratings, new_k)
-        ideal_items = torch.gather(items, -1, ideal_idx)
-        ideal_ratings = torch.gather(ratings, -1, ideal_idx)
+        ideal_items = items[ideal_idx]
+        ideal_ratings = ratings[ideal_idx]
+        # ideal_items = torch.gather(items, -1, ideal_idx)
+        # ideal_ratings = torch.gather(ratings, -1, ideal_idx)
         # recommended
         _,rec_idx = torch.topk(logits, new_k)
-        rec_items  = torch.gather(items,-1,rec_idx)
-        rec_ratings = torch.gather(ratings,-1,rec_idx)
+        rec_items = items[rec_idx]
+        rec_ratings = ratings[rec_idx]
+        # rec_items  = torch.gather(items,-1,rec_idx)
+        # rec_ratings = torch.gather(ratings,-1,rec_idx)
+        
         # mask (ideal에 존재하는지 여부)
         rowA = rec_items.unsqueeze(1)
         rowB = ideal_items.unsqueeze(0)
@@ -185,13 +212,16 @@ class Metrics:
         # precision
         rec_items = rec_items.tolist()
         ideal_items = ideal_items.tolist()
-        # print(set(rec_items))
-        # print(set(items.tolist()))
-        TP = set(rec_items).intersection(set(items.tolist()))
+        gt_items = items[ratings!=0].tolist()
+        TP = set(rec_items).intersection(set(gt_items))
         precision = round(len(TP)/new_k, 4)
-        recall = round(len(TP)/len(items.tolist()), 4)
+        recall = round(len(TP)/len(items), 4)
 
         return pd.Series({
+            'user':user,
+            'items':items.tolist(),
+            'ratings':ratings.tolist(),
+            'logits':logits.tolist(),
             f'ndcg@{k}':float(ndcg),
             f'precision@{k}':float(precision),
             f'recall@{k}':float(recall),

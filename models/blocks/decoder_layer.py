@@ -16,8 +16,6 @@ class DecoderLayer(nn.Module):
 
         self.last_layer_flag = last_layer
         self.dec_layer = is_dec_layer
-        
-        # FFN(Sparse MoE)
 
         # Self attention
         self.norm_self = nn.LayerNorm(d_model)
@@ -74,8 +72,7 @@ class DecoderLayer(nn.Module):
         
         # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
         residual = x
-        enc_output = enc_output # rating 정보 추가 x
-        # enc_output = enc_output + rating_x # rating 정보 추가
+        enc_output = enc_output
         x = self.norm_cross1(x)
         x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
         x = self.dropout_cross1(x)
@@ -90,7 +87,7 @@ class DecoderLayer(nn.Module):
 
         if self.last_layer_flag:
             x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
-            rating_pred = self.last_activation(rating_pred)
+            # rating_pred = self.last_activation(rating_pred)
 
         
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
@@ -111,6 +108,6 @@ class DecoderLayer(nn.Module):
         x = x + residual
 
         # 3-3. activation
-        x = self.activation(x)
+        # x = self.activation(x)
         
         return x, rmse_loss, rating_pred

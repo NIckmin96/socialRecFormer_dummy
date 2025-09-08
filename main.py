@@ -78,8 +78,16 @@ def NDCG(items, logits, ratings):
     
     return ndcg
 
-def BPR(output_batch, rating_batch):
+def BPR(output_batch, rating_batch, neg):
     bpr_loss = 0.0
+    
+    if neg:
+        logits = output_batch[rating_batch==0]
+        logit_0 = logits.sum() if logits.numel()==0 else logits.mean()
+        
+    logits = output_batch[rating_batch==1]
+    logit_1 = logits.sum() if logits.numel()==0 else logits.mean()
+    
     logits = output_batch[rating_batch==1]
     logit_1 = logits.sum() if logits.numel()==0 else logits.mean()
     
@@ -95,10 +103,17 @@ def BPR(output_batch, rating_batch):
     logits = output_batch[rating_batch==5]
     logit_5 = logits.sum() if logits.numel()==0 else logits.mean()
     
-    for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
-        diff = pos-(neg+0.1)
-        loss = -F.logsigmoid(diff)
-        bpr_loss += loss
+    if neg:
+        for neg,pos in [(logit_0, logit_1), (logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+            diff = pos-(neg+0.1)
+            loss = -F.logsigmoid(diff)
+            bpr_loss += loss
+    
+    else:
+        for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+            diff = pos-(neg+0.1)
+            loss = -F.logsigmoid(diff)
+            bpr_loss += loss
         
     return bpr_loss
         
@@ -135,9 +150,10 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
             
             item_lst, rating_lst, output_lst = [],[],[]
             for i in range(batch['anchor_user'].size(0)):
-                items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
-                ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
-                outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
+                mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
+                items = items = batch['anchor_items'][i][mask].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
+                outputs = rank_output[i][mask].data.cpu().tolist()
                 assert len(items)==len(ratings)==len(outputs)
                 item_lst.append(items)
                 rating_lst.append(ratings)
@@ -156,7 +172,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
                                                           'outputs':lambda x:sum(x, start=[])}).reset_index()
     output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
     output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
-    output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
+    output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
     output_df = output_df.dropna(how='any')
     total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
     total_rmse /= (step+1)
@@ -221,16 +237,16 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             # forward pass
             rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
 
-            rating_mask = (batch['item_rating'] != 0)            
-            org_loss = metrics.RMSE(rating_pred, batch['item_rating'], rating_mask)
+            rating_mask = (batch['item_rating'] != 0)
+            org_loss = metrics.MSE(rating_pred, batch['item_rating'], rating_mask)
             org_losses.update(org_loss)
-            y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
+            # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rank_logits = F.softmax(rank_output, dim=-1)
             # rank_loss = RMSE(rank_logits, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_losses.update(rank_loss)
             
-            loss = org_loss + rank_loss
+            loss = 0.9*org_loss + 0.1*rank_loss
             # loss = org_loss
             loss.backward()
 
@@ -303,14 +319,15 @@ def eval2(model, ds_iter):
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
             
             # zero padding인 경우 제외
-            mask = (batch['anchor_items']!=0)
-            rank_output = rank_output*mask
+            # mask = (batch['anchor_items']!=0)
+            # rank_output = rank_output*mask
             
             item_lst, rating_lst, output_lst = [],[],[]
-            for i in range(batch['anchor_user'].size(0)):
-                items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
-                ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
-                outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
+            for i in range(batch['anchor_user'].size(0)): # batch내에서 user별 iteration
+                mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
+                items = batch['anchor_items'][i][mask].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
+                outputs = rank_output[i][mask].data.cpu().tolist()
                 assert len(items)==len(ratings)==len(outputs)
                 item_lst.append(items)
                 rating_lst.append(ratings)
@@ -327,18 +344,35 @@ def eval2(model, ds_iter):
     output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x.tolist(), start=[]),
                                                         'anchor_ratings':lambda x:sum(x.tolist(), start=[]),
                                                         'outputs':lambda x:sum(x.tolist(), start=[])}).reset_index()
+    non_neg_df = output_df.apply(lambda x:filter_negs(x), axis=1)
+    
     output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
-    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())    
-    output_df[['ndcg@10','precision@10','recall@10', 'rec@10', 'ideal@10']] = output_df.apply(lambda x:metrics.rank_metrics(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
-    output_df = output_df.dropna(how='any')
-    filtered_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg@10'].mean()
-    total_ndcg = output_df['ndcg@10'].mean()
-    total_precision = output_df['precision@10'].mean()
-    total_recall = output_df['recall@10'].mean()
+    # output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    
+    non_neg_df['logits'] = non_neg_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # non_neg_df['targets'] = non_neg_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # negative sampling 포함
+    neg_ = output_df.apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    neg_ = neg_.dropna(how='any')
+    neg_ndcg = neg_['ndcg@10'].mean()
+    neg_precision = neg_['precision@10'].mean()
+    neg_recall = neg_['recall@10'].mean()
+    # negative sampling 미포함 + item 개수별 filter x
+    non_neg = non_neg_df.apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    non_neg = non_neg.dropna(how='any')
+    non_neg_ndcg = non_neg['ndcg@10'].mean()
+    non_neg_precision = non_neg['precision@10'].mean()
+    non_neg_recall = non_neg['recall@10'].mean()
+    # non neg + item 개수별 filter o
+    filtered = non_neg_df[non_neg_df['anchor_items'].apply(len)>=10].apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    filtered_ndcg = filtered['ndcg@10'].mean()
+    filtered_precision = filtered['precision@10'].mean()
+    filtered_recall = filtered['recall@10'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)           
     
-    output_df.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}.csv', index=False)
+    neg_.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_neg.csv', index=False)
+    non_neg.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_non_neg.csv', index=False)
         
     if device.type=='cuda':
         end.record(stream)
@@ -347,10 +381,18 @@ def eval2(model, ds_iter):
     print("\n [Evaluation Results]")
     print("RMSE: %2.5f" % total_rmse)
     print("MAE: %2.5f" % total_mae)
-    print("TOTAL RECALL@10: %2.5f" % total_recall)
-    print("TOTAL PRECISION@10: %2.5f" % total_precision)
-    print("TOTAL NDCG@10: %2.5f" % total_ndcg)
-    print("Filtered NDCG@10: %2.5f" % filtered_ndcg)
+    print("################################")
+    print("NEG NDCG@10: %2.5f" % neg_ndcg)
+    print("NEG RECALL@10: %2.5f" % neg_recall)
+    print("NEG PRECISION@10: %2.5f" % neg_precision)
+    print("################################")
+    print("TOTAL NDCG@10: %2.5f" % non_neg_ndcg)
+    print("TOTAL RECALL@10: %2.5f" % non_neg_recall)
+    print("TOTAL PRECISION@10: %2.5f" % non_neg_precision)
+    print("################################")
+    print("FILTERED NDCG@10: %2.5f" % filtered_ndcg)
+    print("FILTERED RECALL@10: %2.5f" % filtered_recall)
+    print("FILTERED PRECISION@10: %2.5f" % filtered_precision)
     # print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
     # print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
     print(f"total eval time: {(start.elapsed_time(end))}")
@@ -382,6 +424,7 @@ def get_args():
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="Whether regen dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
+    parser.add_argument('--neg', type=bool, default=False)
     
     args = parser.parse_args()
     return args
