@@ -94,7 +94,7 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
     # filter again
     total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
-    trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
+    trust_df = trust_df[trust_df.user_id_1.isin(total_users)|trust_df.user_id_2.isin(total_users)]
     
     # Generate user id mapping table
     total_users = sorted(set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).union(set(rating_df.user_id.unique())))
@@ -164,7 +164,7 @@ def generate_social_dataset(data_path, split, rating_split, trust_df, seed, rege
     if (not os.path.isfile(social_file)) or (regen=='all'):
         print(f"Creating Social {split} split sets...\n")
         users = rating_split['user_id'].unique()            
-        social_split = trust_df[(trust_df['user_id_1'].isin(users)) & (trust_df['user_id_2'].isin(users))]
+        social_split = trust_df[(trust_df['user_id_1'].isin(users)) | (trust_df['user_id_2'].isin(users))]
 
         # save
         social_split.to_csv(social_file, index=False)
