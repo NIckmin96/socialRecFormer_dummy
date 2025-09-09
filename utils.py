@@ -136,13 +136,13 @@ class Metrics:
         
         if neg:
             for neg,pos in [(logit_0, logit_1), (logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
-                diff = pos-(neg+2)
+                diff = pos-(neg+1)
                 loss = -F.logsigmoid(diff)
                 bpr_loss += loss
         
         else:
             for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
-                diff = pos-(neg+2)
+                diff = pos-(neg+1)
                 loss = -F.logsigmoid(diff)
                 bpr_loss += loss
             
@@ -209,13 +209,13 @@ class Metrics:
         idcg = torch.sum(ideal_ratings/discount, dim=-1)
         ndcg = dcg/(idcg+1e-10).item()
         ndcg *= (new_k/k) # 보정
-        # precision
+        # precision / recall
         rec_items = rec_items.tolist()
         ideal_items = ideal_items.tolist()
         gt_items = items[ratings!=0].tolist()
         TP = set(rec_items).intersection(set(gt_items))
         precision = round(len(TP)/new_k, 4)
-        recall = round(len(TP)/len(items), 4)
+        recall = round(len(TP)/len(gt_items), 4)
 
         return pd.Series({
             'user':user,

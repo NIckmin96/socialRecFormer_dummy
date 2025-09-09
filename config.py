@@ -54,7 +54,7 @@ ciao_timestamp={
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
-            "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "dropout": 0.3,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
             "num_layers_enc": 3,
             "num_layers_dec": 5,
             "n_experts": 8,

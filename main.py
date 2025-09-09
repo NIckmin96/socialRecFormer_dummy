@@ -135,7 +135,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
             rmse = metrics.RMSE(rating_pred, batch['item_rating'], mask).item()
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rmse += RMSE(rank_output, y_rank_value)
-            mae = metrics.MAE(rating_pred, batch['item_rating'], mask)
+            mae = metrics.MAE(rating_pred, batch['item_rating'], mask).item()
             
             total_rmse += rmse
             total_mae += mae
@@ -220,6 +220,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         start.record(stream)
 
     metrics = Metrics()
+    epoch_rank_loss = 1e9
     # Training step
     for epoch in range(total_epochs):
         losses = AverageMeter()
@@ -231,23 +232,28 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                             dynamic_ncols=True,
                             leave=False)
         
-        
         for step, batch in enumerate(epoch_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
             rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
-
+            
+            rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            rank_losses.update(rank_loss.item())
+            
             rating_mask = (batch['item_rating'] != 0)
-            org_loss = metrics.MSE(rating_pred, batch['item_rating'], rating_mask)
-            org_losses.update(org_loss)
+            org_loss = metrics.RMSE(rating_pred, batch['item_rating'], rating_mask)
+            org_losses.update(org_loss.item())
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rank_logits = F.softmax(rank_output, dim=-1)
             # rank_loss = RMSE(rank_logits, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            rank_losses.update(rank_loss)
             
-            loss = 0.9*org_loss + 0.1*rank_loss
-            # loss = org_loss
+            # loss = rank_loss
+            # if epoch_rank_loss<1:
+            #     loss += 10*org_loss
+            # elif epoch_rank_loss<5e-1:
+            #     loss = org_loss
+            loss = org_loss
+
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -271,6 +277,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
+
+        epoch_rank_loss = rank_losses.avg
 
         print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         if epoch > 100:
@@ -417,7 +425,7 @@ def get_args():
     parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
     parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
-    parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
+    parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")

@@ -47,11 +47,11 @@ def mat_to_csv(data_path:str, regen=False):
         trust_df = trust_df.dropna(how='any')
         trust_df = trust_df.drop_duplicates(keep='first')
         
-        if dataset_name in ['yelp']:
-            # 1. user당 rating이 너무 적은 경우 제외
-            rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
-            # trust를 기준으로 user를 sampling
-            trust_df = trust_df.sample(15000000, random_state=42, replace=False)
+        # if dataset_name in ['yelp']:
+        #     # 1. user당 rating이 너무 적은 경우 제외
+        #     rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
+        #     # trust를 기준으로 user를 sampling
+        #     trust_df = trust_df.sample(15000000, random_state=42, replace=False)
 
         print(f"***** Original Dataset Statistics *****")
         print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())}")
@@ -136,8 +136,9 @@ def shuffle_and_split_dataset(data_path:str, test, seed, regen):
         print("Creating Rating split sets...")
         rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
         rating_df = rating_df.drop_duplicates(subset=['user_id','product_id'],keep='first')
-        split_rating_df = shuffle(rating_df, random_state=seed)
+        split_rating_df = shuffle(rating_df, random_state=1)
         num_test = int(len(split_rating_df)*test)
+        print("num test :", num_test)
         
         # rating_test_set = split_rating_df.iloc[:num_test]
         # rating_train_set = split_rating_df.iloc[num_test:]
@@ -164,7 +165,7 @@ def generate_social_dataset(data_path, split, rating_split, trust_df, seed, rege
     if (not os.path.isfile(social_file)) or (regen=='all'):
         print(f"Creating Social {split} split sets...\n")
         users = rating_split['user_id'].unique()            
-        social_split = trust_df[(trust_df['user_id_1'].isin(users)) | (trust_df['user_id_2'].isin(users))]
+        social_split = trust_df[(trust_df['user_id_1'].isin(users)) & (trust_df['user_id_2'].isin(users))]
 
         # save
         social_split.to_csv(social_file, index=False)
@@ -350,19 +351,13 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
             return item_sequence
         
         def add_negs(user_id, anchor_items):
+            all_items = rating_split.product_id.unique().tolist()
             anchor_items = list(set(anchor_items)-set([0])) # 0(interaction item이 아무것도 없는 경우 넣은 값) 제거
             nnz = rating_matrix[user_id].indices
-            mask = np.ones(rating_matrix.shape[1], dtype=bool)
-            mask[nnz] = False
-            zero_indices = np.flatnonzero(mask)
-            zero_indices = zero_indices[1:] # 0제거
+            zero_indices = np.setdiff1d(all_items, nnz)
             n = len(anchor_items)
-
-            neg_samples = list(np.random.choice(zero_indices, size=n, replace=False))
-            leftover = 10-(2*n)
-            if leftover>0:
-                neg_samples.extend(list(np.random.choice(list(set(zero_indices)-set(neg_samples)), size=leftover, replace=False)))
-                
+            n_samples = max(10-n, n)
+            neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))                
             anchor_items.extend(neg_samples)
             
             np.random.seed(42)

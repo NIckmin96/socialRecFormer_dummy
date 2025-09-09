@@ -36,6 +36,7 @@ class DecoderLayer(nn.Module):
         self.norm_cross1_moe = nn.LayerNorm(d_model)
 
         # prediction layer
+        self.norm_last = nn.LayerNorm(d_model)
         self.last_attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, last_layer_flag=True, is_dec_layer=self.dec_layer, is_rating=True)
         self.last_activation = nn.LeakyReLU()
         
@@ -75,40 +76,40 @@ class DecoderLayer(nn.Module):
         x = self.dropout_self_moe(x)
         x = x + residual
         
-        # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
-        residual = x
-        enc_output = enc_output
-        x = self.norm_cross1(x)
-        x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
-        x = self.dropout_cross1(x)
-        x = x + residual
-        
-        # 2-2. FFN
-        residual = x
-        x = self.norm_cross1_moe(x)
-        x = self.moe_cross1(x)
-        x = self.dropout_cross1_moe(x)
-        x = x + residual
-
         if self.last_layer_flag:
+            x = self.norm_last(x)
+            enc_output = self.norm_last(enc_output)
             x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
-            # rating_pred = self.last_activation(rating_pred)
 
+        else:
+            # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
+            residual = x
+            enc_output = self.norm_cross1(enc_output)
+            x = self.norm_cross1(x)
+            x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
+            x = self.dropout_cross1(x)
+            x = x + residual
+            
+            # 2-2. FFN
+            residual = x
+            x = self.norm_cross1_moe(x)
+            x = self.moe_cross1(x)
+            x = self.dropout_cross1_moe(x)
+            x = x + residual
         
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
         residual = x
         x = self.x_lin(x)
         x_anchor_i = self.anchor_i_lin(x_anchor_i)
         x = torch.cat((x, x_anchor_i), dim=-1)
-        # x = x + x_anchor_i # [TODO] Concatenation으로 변경해서 실험
         
-        x = self.norm_cross2(x)
         x_anchor = self.anchor_u_lin(x_anchor)
         enc_output = self.enc_lin(enc_output)
         new_enc_output = torch.cat((enc_output, x_anchor.expand(*enc_output.size())), dim=-1)
-        # new_enc_output = enc_output + x_anchor.expand(-1,enc_output.size(1),-1) # [TODO] Concatenation으로 변경해서 실험
+        new_enc_output = self.norm_cross2(new_enc_output)
+        x = self.norm_cross2(x)
+        
         x, _ = self.cross_attention2(Q=x, K=new_enc_output, V=new_enc_output, mask=cross_attn_mask_2, attn_bias=None)
-        # Ranking loss(BCE)
         x = self.dropout_cross2(x)
         x = x + residual
     

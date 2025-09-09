@@ -97,7 +97,7 @@ class Decoder(nn.Module):
         
         # Pass to prediction layer
         output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, None, None)
-        rmse_losses.append(rmse_loss)
+        # rmse_losses.append(rmse_loss)
         
         # [bs, i, d] => [bs, i]
         output = torch.mean(output, dim=-1)
