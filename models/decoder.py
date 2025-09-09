@@ -59,7 +59,7 @@ class Decoder(nn.Module):
                 dropout = dropout,
                 last_layer = False,
                 is_dec_layer = True
-            ) for _ in range(num_layers)]
+            ) for _ in range(num_layers-1)]
         )
 
         # rating prediction layer(=last layer)

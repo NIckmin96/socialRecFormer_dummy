@@ -242,7 +242,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             # rank_losses.update(rank_loss.item())
             
             rating_mask = (batch['item_rating'] != 0)
-            org_loss = metrics.RMSE(rating_pred, batch['item_rating'], rating_mask)
+            org_loss = metrics.MSE(rating_pred, batch['item_rating'], rating_mask)
             org_losses.update(org_loss.item())
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rank_logits = F.softmax(rank_output, dim=-1)
@@ -253,7 +253,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             #     loss += 10*org_loss
             # elif epoch_rank_loss<5e-1:
             #     loss = org_loss
-            loss = org_loss+norm
+            # loss = org_loss+norm
+            loss = org_loss
 
             loss.backward()
 
@@ -420,8 +421,8 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=1, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=1, help="num dec layers")
+    parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
+    parser.add_argument('--num_layers_dec', type=int, default=6, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
     parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
@@ -583,8 +584,8 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.9,
-        patience = 5,
+        factor = 0.95,
+        patience = 10,
         threshold = 1e-2,
         verbose = True
     )

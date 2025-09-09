@@ -75,30 +75,34 @@ class DecoderLayer(nn.Module):
         # 1-1. MoE
         residual = x
         x = self.norm_self_moe(x)
-        # x = self.ffn_self(x)
-        x = self.moe_self(x)
+        x = self.ffn_self(x)
+        # x = self.moe_self(x)
         x = self.dropout_self_moe(x)
         x = x + residual
+
+        # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
+        residual = x
+        enc_output = self.norm_cross1(enc_output)
+        x = self.norm_cross1(x)
+        x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=None)
+        x = self.dropout_cross1(x)
+        x = x + residual 
         
         if self.last_layer_flag:
             x = self.norm_last(x)
             enc_output = self.norm_last(enc_output)
-            x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=None)
+            # last layer에서 attention하지 않고, representation간의 matmul을 통해 MF
+            rating_pred = torch.matmul(x, enc_output.transpose(2,1))
+            
+            # x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=None)
             # rating_pred = self.last_activation(rating_pred)
         
         else:
-            # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
-            residual = x
-            enc_output = self.norm_cross1(enc_output)
-            x = self.norm_cross1(x)
-            x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=None)
-            x = self.dropout_cross1(x)
-            x = x + residual 
             # 2-2. FFN
             residual = x
             x = self.norm_cross1_moe(x)
-            # x = self.ffn_cross1(x)
-            x = self.moe_cross1(x)
+            x = self.ffn_cross1(x)
+            # x = self.moe_cross1(x)
             x = self.dropout_cross1_moe(x)
             x = x + residual
 
@@ -121,7 +125,8 @@ class DecoderLayer(nn.Module):
         # 3-2. FFN
         residual = x
         x = self.norm_cross2_moe(x)
-        x = self.moe_cross2(x)
+        x = self.ffn_cross2(x)
+        # x = self.moe_cross2(x)
         x = self.dropout_cross2_moe(x)
         x = x + residual
 
