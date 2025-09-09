@@ -122,8 +122,8 @@ def prepare_org_data(data, side_info=True):
         trust_df = trust_df.drop(columns='Weight')
         
     # save dataframe to csv
-    rating_df.to_csv(os.path.join(data_dir, 'rating_org.csv'), index=False)
-    trust_df.to_csv(os.path.join(data_dir, 'trustnetwork_org.csv'), index=False)
+    rating_df.to_csv(os.path.join(os.path.join(*data_dir.split('/')[:-1]), 'rating_org.csv'), index=False)
+    trust_df.to_csv(os.path.join(os.path.join(*data_dir.split('/')[:-1]), 'trustnetwork_org.csv'), index=False)
     
     print("###### Data Source Processed ######")
     print(f"Num of users : {rating_df.user_id.nunique()}")

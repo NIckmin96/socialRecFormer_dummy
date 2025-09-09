@@ -47,11 +47,18 @@ def mat_to_csv(data_path:str, regen=False):
         trust_df = trust_df.dropna(how='any')
         trust_df = trust_df.drop_duplicates(keep='first')
         
-        if dataset_name in ['yelp']:
-            # 1. user당 rating이 너무 적은 경우 제외
-            rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
-            # trust를 기준으로 user를 sampling
-            trust_df = trust_df.sample(15000000, random_state=42, replace=False)
+        # if dataset_name in ['yelp']:
+        #     # 1. user당 rating이 너무 적은 경우 제외
+        #     rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
+        #     # trust를 기준으로 user를 sampling
+        #     trust_df = trust_df.sample(15000000, random_state=42, replace=False)
+
+        print(f"***** Original Dataset Statistics *****")
+        print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())}")
+        print(f"# of users in rating df : {rating_df.user_id.nunique()}")
+        print(f"# of items : {rating_df.product_id.nunique()}")
+        print(f"# of interactions : {rating_df.shape[0]}")
+        print(f"# of Social Links : {trust_df.shape[0]}")
             
         rating_df, trust_df = reset_and_filter_data(rating_df, trust_df)
         rating_df = add_degree(rating_df, trust_df)
@@ -84,9 +91,13 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
     total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
     trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
+    # filter again
+    total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
+    rating_df = rating_df[rating_df.user_id.isin(total_users)]
+    trust_df = trust_df[trust_df.user_id_1.isin(total_users)|trust_df.user_id_2.isin(total_users)]
     
     # Generate user id mapping table
-    total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).union(set(rating_df.user_id.unique()))
+    total_users = sorted(set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).union(set(rating_df.user_id.unique())))
     mapping_table_user = {user_id:idx+1 for idx,user_id in enumerate(total_users)}
     # Generate item id mapping table
     mapping_table_item = {item_id:idx+1 for idx,item_id in enumerate(rating_df['product_id'].unique())}    
@@ -125,8 +136,9 @@ def shuffle_and_split_dataset(data_path:str, test, seed, regen):
         print("Creating Rating split sets...")
         rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
         rating_df = rating_df.drop_duplicates(subset=['user_id','product_id'],keep='first')
-        split_rating_df = shuffle(rating_df, random_state=seed)
+        split_rating_df = shuffle(rating_df, random_state=1)
         num_test = int(len(split_rating_df)*test)
+        print("num test :", num_test)
         
         # rating_test_set = split_rating_df.iloc[:num_test]
         # rating_train_set = split_rating_df.iloc[num_test:]
@@ -165,41 +177,12 @@ def generate_social_dataset(data_path, split, rating_split, trust_df, seed, rege
     
     return social_split, rating_split
 
-def generate_social_random_walk_sequence(data_path, rating_split, social_split, walk_length, data_split_seed, split, regen):
+def generate_social_random_walk_sequence(data_path, rating_split, social_split, walk_length, augs, data_split_seed, split, regen):
     # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
-    anchor_nodes = []
     social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
-    
-    ####### train=75% / 나머지 = 1번 #######
-    # if split=='train':
-    #     rating_users = rating_split.user_id.unique()
-    #     user_counts = rating_split['user_id'].value_counts()
-    #     per_user = user_counts.quantile(0.25)
-    #     if data_path.split('/')[-1] in ['yelp']:
-    #         per_user = 1
-    
-    # else:
-    #     per_user=1
-    #     rating_users = social_graph.nodes()
-    #     user_counts = {user:per_user for user in social_graph.nodes()}
-    ######################################
-    
-    # rating split기준 실험
-    # rating_users = rating_split.user_id.unique()
-    # user_counts = rating_split['user_id'].value_counts()
-    # per_user = user_counts.quantile(0.25)
-    # if data_path.split('/')[-1] in ['yelp']:
-    #     per_user = 1
-        
-    # print("per user : ", per_user)
-    
-    # for user,cnt in user_counts.items():
-    #     k = int(min(per_user, cnt))
-    #     anchor_nodes.extend([user]*k)
-
-    anchor_nodes = social_graph.nodes()
+    anchor_nodes = list(social_graph.nodes())*augs
         
     # save dir 지정
     # all, rw, total
@@ -210,10 +193,7 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
         df = pd.read_csv(file_path)
     # 새로 생성 or regen
     else:
-        user_degree_dic = rating_split.groupby('user_id')['user_degree'].unique().map(lambda x:int(x[0])).to_dict()
-        # random walk sequence
-        # anchor_cnt = {n:0 for n in rating_users}
-        
+        user_degree_dic = rating_split.groupby('user_id')['user_degree'].unique().map(lambda x:int(x[0])).to_dict()        
         anchor_seq_degree = []
         # seq_set = set()
         print(f"{split} random walk sequence file doesn't exist!")
@@ -312,17 +292,15 @@ def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame
         print(f"rw_train len : {len(random_walk_train)} / rw_valid len : {len(random_walk_valid)} / rw_test len : {len(random_walk_test)}")
 
     return random_walk_train, random_walk_valid, random_walk_test
-
-def union_user_item_dict(test_dict, valid_dict):
-    for k,v in valid_dict.items():
-        test_dict[k] = list(set(v).union(set(test_dict.get(k,[]))))
-    return test_dict   
     
-def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, random_walk_len, item_per_user, regen, used_pairs:dict={}):
+def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic, product_degree_dic, rating_matrix, seed, split, random_walk_len, item_per_user, regen, neg, used_pairs:dict={}):
 
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
-    total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
+    if neg:
+        total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}_neg.pkl"
+    else:
+        total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{split}.pkl"
 
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(regen=='no'):
@@ -338,14 +316,10 @@ def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, ran
         print(f"Creating {split} total df(input_sequence_data)...")
         
         if split=='train':
-            used_pairs = {user:set() for user in rating_df.user_id.unique()}
-        
-        rating_matrix = sparse.load_npz(os.path.join(data_path, 'rating_matrix.npz'))
-        user_degree_dic = rating_df.groupby('user_id')['user_degree'].unique().map(lambda x:x.item()).to_dict()
-        product_degree_dic = rating_df.groupby('product_id')['product_degree'].unique().map(lambda x:int(x[0])).to_dict()
+            used_pairs = {user:set() for user in rating_split.user_id.unique()}
 
-        interacted_items = rating_df.groupby('user_id')['product_id'].unique().to_dict()
-        filtered_items = {user:list(set(items)-used_pairs[user]) for user,items in interacted_items.items()}
+        interacted_items = rating_split.groupby('user_id')['product_id'].unique().to_dict()
+        filtered_items = {user:list(set(items)-used_pairs.get(user,set())) for user,items in interacted_items.items()}
         
         def str_to_list(x):
             if type(x)==str:
@@ -360,34 +334,60 @@ def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, ran
 
             return result_list
         
+        # rating split안에서만 item select하도록 변경 -> train/valid/test간에 완전 분리
         def map_user_items(user_sequence):
             item_sequence = []
             for user in user_sequence:
-                items = filtered_items[user]
+                items = interacted_items[user]
                 if len(items)>item_per_user:
                     selected = np.random.choice(items, item_per_user, replace=False).tolist()
                 elif len(items)==0:
                     selected = [0]
                 else:
-                    selected = items
+                    selected  = list(items)
                     
-                used_pairs[user] = used_pairs.get(user, set()).union(set(selected))
-                item_sequence.extend(selected)
+            item_sequence.extend(selected)
             
             return item_sequence
+        
+        def add_negs(user_id, anchor_items):
+            all_items = rating_split.product_id.unique().tolist()
+            anchor_items = list(set(anchor_items)-set([0])) # 0(interaction item이 아무것도 없는 경우 넣은 값) 제거
+            nnz = rating_matrix[user_id].indices
+            zero_indices = np.setdiff1d(all_items, nnz)
+            n = len(anchor_items)
+            n_samples = max(10-n, n)
+            neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))                
+            anchor_items.extend(neg_samples)
+            
+            np.random.seed(42)
+            np.random.shuffle(anchor_items)
+            
+            assert len(anchor_items)>=10
+        
+            return pd.Series({'anchor_items':list(anchor_items),
+                              'neg_samples':list(neg_samples)})
                     
         # str type으로 저장된 데이터 list로 변환 
         tqdm.pandas()
         total_df = pd.DataFrame()
         print("Processing Default information ...")
-        total_df['user_sequences'] = user_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
-        total_df['user_degree'] = user_df.apply(lambda x: str_to_list(x['degree']), axis=1)
+        total_df['user_sequences'] = rw_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
+        total_df['user_degree'] = rw_df.apply(lambda x: str_to_list(x['degree']), axis=1)
         total_df['item_sequences'] = total_df['user_sequences'].progress_map(map_user_items) # item mapping + 이전 split에서 사용한 pair 제거
         total_df['item_degree'] = total_df['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
         
         total_df['user_id'] = total_df['user_sequences'].progress_map(lambda x:x[0])
         total_df['anchor_degree'] = total_df['user_id'].progress_map(lambda x:user_degree_dic[x])
-        total_df['anchor_items'] = total_df['user_id'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else [0])
+        total_df['anchor_items'] = total_df['user_id'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else None)
+        # iteraction item 아무것도 없는 경우 drop
+        total_df.dropna(subset='anchor_items', inplace=True)
+        
+        # negative sampling
+        if neg:
+            print("Negative Sampling...")
+            total_df[['anchor_items','neg_samples']] = total_df[['user_id','anchor_items']].progress_apply(lambda x:add_negs(x['user_id'],x['anchor_items']), axis=1)
+        
         total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
 
         # slice and pad
@@ -403,12 +403,14 @@ def generate_input_sequence_data(data_path, user_df, rating_df, seed, split, ran
         total_df['item_rating'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray()), axis=1)
         total_df['anchor_ratings'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_id'],:][:,x['anchor_items']].toarray()), axis=1)        
         
-        total_df = total_df[['user_id','user_sequences','user_degree','item_sequences','item_degree','item_rating','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree']]
+        if neg:
+            total_df = total_df[['user_id','user_sequences','user_degree','item_sequences','item_degree','item_rating','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree','neg_samples']]
+        else:
+            total_df = total_df[['user_id','user_sequences','user_degree','item_sequences','item_degree','item_rating','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree']]
 
         with open(total_path, "wb") as file:
             pickle.dump(total_df, file)
 
-        print(f"total df dir : {total_path}")
         print(f"# of total {split} : {len(total_df)}")    
         
     return total_df, used_pairs

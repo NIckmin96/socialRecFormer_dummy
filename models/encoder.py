@@ -11,7 +11,7 @@ class Encoder(nn.Module):
     Encoder for modeling user representation (in social graph)
     """
     # def __init__(self, max_degree, num_user, d_model, d_ffn, num_heads, dropout, num_layers):
-    def __init__(self, max_degree, num_user, max_spd_value, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, user_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -26,15 +26,7 @@ class Encoder(nn.Module):
         """
         super(Encoder, self).__init__()
 
-        self.max_degree = max_degree
-        self.num_user = num_user
-        self.max_spd_value = max_spd_value
-
-        self.input_embed = SocialNodeEncoder(
-            num_nodes = self.num_user,
-            max_degree = self.max_degree,
-            d_model = d_model
-        )
+        self.user_embed = user_embed
 
         self.enc_layers = nn.ModuleList(
             [EncoderLayer(
@@ -48,10 +40,11 @@ class Encoder(nn.Module):
         )
     
     def forward(self, batched_data):
-        x = self.input_embed(batched_data['user_seq'], batched_data['user_degree'])
+        x = self.user_embed(batched_data['user_seq'], batched_data['user_degree'])
 
         # Generate mask for padded data
         src_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
+        # print(src_mask[src_mask==0].shape)
         # attn_bias = self.spatial_pos_bias(batched_data)
 
         losses = []
@@ -62,4 +55,4 @@ class Encoder(nn.Module):
             losses.append(spd_loss)
 
         
-        return x, sum(losses)/len(losses), self.input_embed
+        return x, sum(losses)/len(losses)

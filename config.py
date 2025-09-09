@@ -27,7 +27,7 @@ ciao={
             "learning_rate":0.01,
             "warmup":40, 
             "lr_decay":"linear",
-            "weight_decay":1e-1,
+            "weight_decay":1e-3,
             "num_epochs":100,
             "patience":10, 
             "alpha":1,
@@ -50,13 +50,13 @@ ciao_timestamp={
             "num_item": 77524,
             "max_user_degree": 453,
             "max_item_degree": 334,
-            "max_spd_value": 15,
+            # "max_spd_value": 15,
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
-            "dropout": 0.3,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
             "num_layers_enc": 3,
-            "num_layers_dec": 5,
+            "num_layers_dec": 3,
             "n_experts": 8,
             "topk": 2
          },
@@ -88,8 +88,8 @@ epinions={
             "num_item": 261679,
             "max_user_degree": 2026,
             "max_item_degree": 1155,
-            "max_spd_value": 15,
-            "d_model": 56,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
+            # "max_spd_value": 15,
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
@@ -104,7 +104,7 @@ epinions={
             "learning_rate":0.01,
             "warmup":80, 
             "lr_decay":"cos",
-            "weight_decay":1e-1,
+            "weight_decay":1e-2,
             "eval_frequency":400, 
             "num_epochs":100,
             "num_eval_steps":849,   # total_valid_sample / total_epoch
@@ -124,7 +124,7 @@ yelp={
             "max_user_degree": 4118,
             "max_item_degree": 717,
             "max_spd_value": 15,
-            "d_model": 32,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
@@ -159,7 +159,7 @@ douban={
             "max_user_degree": 4118,
             "max_item_degree": 717,
             "max_spd_value": 15,
-            "d_model": 48,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
+            "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)

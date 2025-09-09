@@ -78,8 +78,16 @@ def NDCG(items, logits, ratings):
     
     return ndcg
 
-def BPR(output_batch, rating_batch):
+def BPR(output_batch, rating_batch, neg):
     bpr_loss = 0.0
+    
+    if neg:
+        logits = output_batch[rating_batch==0]
+        logit_0 = logits.sum() if logits.numel()==0 else logits.mean()
+        
+    logits = output_batch[rating_batch==1]
+    logit_1 = logits.sum() if logits.numel()==0 else logits.mean()
+    
     logits = output_batch[rating_batch==1]
     logit_1 = logits.sum() if logits.numel()==0 else logits.mean()
     
@@ -95,10 +103,17 @@ def BPR(output_batch, rating_batch):
     logits = output_batch[rating_batch==5]
     logit_5 = logits.sum() if logits.numel()==0 else logits.mean()
     
-    for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
-        diff = pos-(neg+0.1)
-        loss = -F.logsigmoid(diff)
-        bpr_loss += loss
+    if neg:
+        for neg,pos in [(logit_0, logit_1), (logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+            diff = pos-(neg+0.1)
+            loss = -F.logsigmoid(diff)
+            bpr_loss += loss
+    
+    else:
+        for neg,pos in [(logit_1, logit_2), (logit_2, logit_3), (logit_3, logit_4), (logit_4, logit_5)]:
+            diff = pos-(neg+0.1)
+            loss = -F.logsigmoid(diff)
+            bpr_loss += loss
         
     return bpr_loss
         
@@ -107,6 +122,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     eval_losses = AverageMeter()
     model.eval()
     
+    metrics = Metrics()
     total_rmse, total_mae = 0.0, 0.0
     output_df = pd.DataFrame()
     with torch.no_grad():
@@ -114,12 +130,12 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
         for step, batch in enumerate(epoch_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
-            rank_output, rating_pred, _, _ = model(batch, is_train=False)
+            rank_output, rating_pred, norm = model(batch)
             mask = (batch['item_rating'] != 0)
-            rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
+            rmse = metrics.RMSE(rating_pred, batch['item_rating'], mask).item()
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rmse += RMSE(rank_output, y_rank_value)
-            mae = MAE(rating_pred, batch['item_rating'], mask)
+            mae = metrics.MAE(rating_pred, batch['item_rating'], mask).item()
             
             total_rmse += rmse
             total_mae += mae
@@ -129,40 +145,42 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
             
             # zero padding인 경우 제외
-            mask = (batch['anchor_items']!=0)
-            rank_output = rank_output*mask
+            # mask = (batch['anchor_items']!=0)
+    #         rank_output = rank_output*mask
             
-            item_lst, rating_lst, output_lst = [],[],[]
-            for i in range(batch['anchor_user'].size(0)):
-                items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
-                ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
-                outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
-                assert len(items)==len(ratings)==len(outputs)
-                item_lst.append(items)
-                rating_lst.append(ratings)
-                output_lst.append(outputs)
-            anchor_users = batch['anchor_user'].data.cpu().tolist()
+    #         item_lst, rating_lst, output_lst = [],[],[]
+    #         for i in range(batch['anchor_user'].size(0)):
+    #             mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
+    #             items = items = batch['anchor_items'][i][mask].data.cpu().tolist()
+    #             ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
+    #             outputs = rank_output[i][mask].data.cpu().tolist()
+    #             assert len(items)==len(ratings)==len(outputs)
+    #             item_lst.append(items)
+    #             rating_lst.append(ratings)
+    #             output_lst.append(outputs)
+    #         anchor_users = batch['anchor_user'].data.cpu().tolist()
             
-            df = pd.DataFrame({'anchor_user':anchor_users,
-                               'anchor_items':item_lst,
-                               'anchor_ratings':rating_lst,
-                               'outputs':output_lst})
+    #         df = pd.DataFrame({'anchor_user':anchor_users,
+    #                            'anchor_items':item_lst,
+    #                            'anchor_ratings':rating_lst,
+    #                            'outputs':output_lst})
             
-            output_df = pd.concat([output_df, df])
+    #         output_df = pd.concat([output_df, df])
             
-    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
-                                                          'anchor_ratings':lambda x:sum(x, start=[]),
-                                                          'outputs':lambda x:sum(x, start=[])}).reset_index()
-    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
-    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
-    output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
-    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    # output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
+    #                                                       'anchor_ratings':lambda x:sum(x, start=[]),
+    #                                                       'outputs':lambda x:sum(x, start=[])}).reset_index()
+    # output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
+    # output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
+    # output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
+    # output_df = output_df.dropna(how='any')
+    # total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)
             
-    if ((1/total_rmse)*0.1+(total_ndcg)*0.9 > (1/best_rmse)*0.1+(best_ndcg)*0.9): 
-    # if (total_rmse < best_rmse) | (total_ndcg > best_ndcg): 
-        best_ndcg = total_ndcg
+    # if ((1/total_rmse)*0.1+(total_ndcg)*0.9 > (1/best_rmse)*0.1+(best_ndcg)*0.9): 
+    if (total_rmse < best_rmse): 
+        # best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_mae = total_mae
         torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
@@ -172,7 +190,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     else:
         update_cnt += 1
 
-    return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_ndcg, total_rmse, total_mae, update_cnt
+    # return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_ndcg, total_rmse, total_mae, update_cnt
+    return eval_losses.avg, best_rmse, best_mae, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
@@ -201,6 +220,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         stream = torch.cuda.current_stream(device=device)
         start.record(stream)
 
+    metrics = Metrics()
+    epoch_rank_loss = 1e9
     # Training step
     for epoch in range(total_epochs):
         losses = AverageMeter()
@@ -212,23 +233,29 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                             dynamic_ncols=True,
                             leave=False)
         
-        
         for step, batch in enumerate(epoch_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
-            rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
-
-            rating_mask = (batch['item_rating'] != 0)            
-            org_loss = RMSE(rating_pred, batch['item_rating'], rating_mask)
-            org_losses.update(org_loss)
-            y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
+            rank_output, rating_pred, norm = model(batch)
+            
+            # rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            # rank_losses.update(rank_loss.item())
+            
+            rating_mask = (batch['item_rating'] != 0)
+            org_loss = metrics.MSE(rating_pred, batch['item_rating'], rating_mask)
+            org_losses.update(org_loss.item())
+            # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
             # rank_logits = F.softmax(rank_output, dim=-1)
             # rank_loss = RMSE(rank_logits, y_rank_value) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            rank_loss = BPR(rank_output, batch['anchor_ratings'].float()) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            rank_losses.update(rank_loss)
             
-            loss = org_loss + rank_loss
-            # loss = org_loss
+            # loss = rank_loss
+            # if epoch_rank_loss<1:
+            #     loss += 10*org_loss
+            # elif epoch_rank_loss<5e-1:
+            #     loss = org_loss
+            # loss = org_loss+norm
+            loss = org_loss
+
             loss.backward()
 
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
@@ -245,18 +272,22 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             torch.cuda.synchronize()
             
         total_time += (start.elapsed_time(end))
-        valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
-        lr_scheduler.step((1/valid_rmse)*0.1+(valid_ndcg)*0.9) # ReduceLROnPlateau
+        valid_loss, best_rmse, best_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        # valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
 
         # Tensorboard recording
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
-        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        # epoch_rank_loss = rank_losses.avg
+
+        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
         if epoch > 100:
             break
-        if update_cnt > 20: 
+        if update_cnt > 100: 
             break
     writer.close()
 
@@ -269,6 +300,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     
 def eval2(model, ds_iter):
     model.eval()
+    metrics = Metrics()
     if device.type=='cuda':
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
@@ -288,10 +320,10 @@ def eval2(model, ds_iter):
         for step, batch in enumerate(epoch_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
-            rank_output, rating_pred, _, _ = model(batch, is_train=False)
+            rank_output, rating_pred, norm = model(batch)
             mask = (batch['item_rating'] != 0)
-            rmse = RMSE(rating_pred, batch['item_rating'], mask).item()
-            mae = MAE(rating_pred, batch['item_rating'], mask)
+            rmse = metrics.RMSE(rating_pred, batch['item_rating'], mask).item()
+            mae = metrics.MAE(rating_pred, batch['item_rating'], mask)
             total_rmse += rmse
             total_mae += mae
             
@@ -299,14 +331,15 @@ def eval2(model, ds_iter):
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
             
             # zero padding인 경우 제외
-            mask = (batch['anchor_items']!=0)
-            rank_output = rank_output*mask
+            # mask = (batch['anchor_items']!=0)
+            # rank_output = rank_output*mask
             
             item_lst, rating_lst, output_lst = [],[],[]
-            for i in range(batch['anchor_user'].size(0)):
-                items = batch['anchor_items'][i][batch['anchor_items'][i]!=0].data.cpu().tolist()
-                ratings = batch['anchor_ratings'][i][batch['anchor_ratings'][i]!=0].data.cpu().tolist()
-                outputs = rank_output[i][rank_output[i]!=0].data.cpu().tolist()
+            for i in range(batch['anchor_user'].size(0)): # batch내에서 user별 iteration
+                mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
+                items = batch['anchor_items'][i][mask].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
+                outputs = rank_output[i][mask].data.cpu().tolist()
                 assert len(items)==len(ratings)==len(outputs)
                 item_lst.append(items)
                 rating_lst.append(ratings)
@@ -320,17 +353,38 @@ def eval2(model, ds_iter):
             
             output_df = pd.concat([output_df, df])
             
-    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
-                                                        'anchor_ratings':lambda x:sum(x, start=[]),
-                                                        'outputs':lambda x:sum(x, start=[])}).reset_index()
-    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
-    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
-    output_df['ndcg'] = output_df.apply(lambda x:NDCG(x['anchor_items'], x['logits'], x['anchor_ratings']), axis=1)
-    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x.tolist(), start=[]),
+                                                        'anchor_ratings':lambda x:sum(x.tolist(), start=[]),
+                                                        'outputs':lambda x:sum(x.tolist(), start=[])}).reset_index()
+    non_neg_df = output_df.apply(lambda x:filter_negs(x), axis=1)
+    
+    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    
+    non_neg_df['logits'] = non_neg_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # non_neg_df['targets'] = non_neg_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # negative sampling 포함
+    neg_ = output_df.apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    neg_ = neg_.dropna(how='any')
+    neg_ndcg = neg_['ndcg@10'].mean()
+    neg_precision = neg_['precision@10'].mean()
+    neg_recall = neg_['recall@10'].mean()
+    # negative sampling 미포함 + item 개수별 filter x
+    non_neg = non_neg_df.apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    non_neg = non_neg.dropna(how='any')
+    non_neg_ndcg = non_neg['ndcg@10'].mean()
+    non_neg_precision = non_neg['precision@10'].mean()
+    non_neg_recall = non_neg['recall@10'].mean()
+    # non neg + item 개수별 filter o
+    filtered = non_neg_df[non_neg_df['anchor_items'].apply(len)>=10].apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    filtered_ndcg = filtered['ndcg@10'].mean()
+    filtered_precision = filtered['precision@10'].mean()
+    filtered_recall = filtered['recall@10'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)           
     
-    output_df.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}.csv')
+    neg_.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_neg.csv', index=False)
+    non_neg.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_non_neg.csv', index=False)
         
     if device.type=='cuda':
         end.record(stream)
@@ -339,7 +393,18 @@ def eval2(model, ds_iter):
     print("\n [Evaluation Results]")
     print("RMSE: %2.5f" % total_rmse)
     print("MAE: %2.5f" % total_mae)
-    print("NDCG@10: %2.5f" % total_ndcg)
+    print("################################")
+    print("NEG NDCG@10: %2.5f" % neg_ndcg)
+    print("NEG RECALL@10: %2.5f" % neg_recall)
+    print("NEG PRECISION@10: %2.5f" % neg_precision)
+    print("################################")
+    print("TOTAL NDCG@10: %2.5f" % non_neg_ndcg)
+    print("TOTAL RECALL@10: %2.5f" % non_neg_recall)
+    print("TOTAL PRECISION@10: %2.5f" % non_neg_precision)
+    print("################################")
+    print("FILTERED NDCG@10: %2.5f" % filtered_ndcg)
+    print("FILTERED RECALL@10: %2.5f" % filtered_recall)
+    print("FILTERED PRECISION@10: %2.5f" % filtered_precision)
     # print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
     # print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
     print(f"total eval time: {(start.elapsed_time(end))}")
@@ -357,25 +422,26 @@ def get_args():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
     parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=5, help="num dec layers")
+    parser.add_argument('--num_layers_dec', type=int, default=6, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
-    parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
     parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
-    parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
-    parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
+    parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
+    parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="Whether regen dataframe(random walk & total df) or not")    
     parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
+    parser.add_argument('--neg', type=bool, default=False)
     
     args = parser.parse_args()
     return args
 
 def main():
+    global device, args
     global device, args
 
     args = get_args()
@@ -437,7 +503,7 @@ def main():
     model_config["topk"] = args.topk + int(math.log(args.augs,2))
     
     # model expansion (3) : rating threshold for ranking task
-    model_config["rating_thres"] = args.rating_thres
+    # model_config["rating_thres"] = args.rating_thres
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -456,7 +522,7 @@ def main():
 
     ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
     print(model_config)
-    model = Transformer(**model_config, args=args)
+    model = Transformer(**model_config)
 
     # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
@@ -518,8 +584,8 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.85,
-        patience = 3,
+        factor = 0.95,
+        patience = 10,
         threshold = 1e-2,
         verbose = True
     )
