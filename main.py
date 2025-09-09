@@ -246,7 +246,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             
         total_time += (start.elapsed_time(end))
         valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
-        lr_scheduler.step(valid_loss) # ReduceLROnPlateau
+        lr_scheduler.step((1/valid_rmse)*0.1+(valid_ndcg)*0.9) # ReduceLROnPlateau
 
         # Tensorboard recording
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
