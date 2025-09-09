@@ -23,6 +23,7 @@ class DecoderLayer(nn.Module):
         self.dropout_self = nn.Dropout(p=dropout)
         # self attention - moe
         self.norm_self_moe = nn.LayerNorm(d_model)
+        self.ffn_self = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.moe_self = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.dropout_self_moe = nn.Dropout(p=dropout)
 
@@ -32,6 +33,7 @@ class DecoderLayer(nn.Module):
         self.dropout_cross1 = nn.Dropout(p=dropout)
         # Cross Attention(1) - moe
         self.dropout_cross1_moe = nn.Dropout(p=dropout)
+        self.ffn_cross1 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.moe_cross1 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.norm_cross1_moe = nn.LayerNorm(d_model)
 
@@ -51,6 +53,7 @@ class DecoderLayer(nn.Module):
         self.dropout_cross2 = nn.Dropout(p=dropout)
         # Cross Attention(2) : ffn
         self.norm_cross2_moe = nn.LayerNorm(d_model)
+        self.ffn_cross2 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.moe_cross2 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.dropout_cross2_moe = nn.Dropout(p=dropout)
         
@@ -58,7 +61,7 @@ class DecoderLayer(nn.Module):
         # activation
         self.activation = nn.LeakyReLU()
 
-    def forward(self, x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, rating_bias, ranking_bias):
+    def forward(self, x_item, x_anchor, x_anchor_i, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2):
         # tmp
         rmse_loss = 0
         rating_pred = None
@@ -72,6 +75,7 @@ class DecoderLayer(nn.Module):
         # 1-1. MoE
         residual = x
         x = self.norm_self_moe(x)
+        # x = self.ffn_self(x)
         x = self.moe_self(x)
         x = self.dropout_self_moe(x)
         x = x + residual
@@ -79,24 +83,25 @@ class DecoderLayer(nn.Module):
         if self.last_layer_flag:
             x = self.norm_last(x)
             enc_output = self.norm_last(enc_output)
-            x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
-
+            x, rmse_loss, rating_pred = self.last_attn(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=None)
+            # rating_pred = self.last_activation(rating_pred)
+        
         else:
             # 2-1. Cross Attention(1) : [user sequences - item sequences] 간의 aggregation
             residual = x
             enc_output = self.norm_cross1(enc_output)
             x = self.norm_cross1(x)
-            x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=rating_bias)
+            x, rmse_loss = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=cross_attn_mask_1, attn_bias=None)
             x = self.dropout_cross1(x)
-            x = x + residual
-            
+            x = x + residual 
             # 2-2. FFN
             residual = x
             x = self.norm_cross1_moe(x)
+            # x = self.ffn_cross1(x)
             x = self.moe_cross1(x)
             x = self.dropout_cross1_moe(x)
             x = x + residual
-        
+
         # 3-1. Cross Attention(2) : (anchor user - item sequences) + (user-item seq representation)의 aggregation
         residual = x
         x = self.x_lin(x)

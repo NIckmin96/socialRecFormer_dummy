@@ -130,7 +130,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
         for step, batch in enumerate(epoch_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
-            rank_output, rating_pred, _, _ = model(batch, is_train=False)
+            rank_output, rating_pred, norm = model(batch)
             mask = (batch['item_rating'] != 0)
             rmse = metrics.RMSE(rating_pred, batch['item_rating'], mask).item()
             # y_rank_value = F.softmax(batch['anchor_ratings'].float(), dim=-1)
@@ -145,42 +145,42 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
             
             # zero padding인 경우 제외
-            mask = (batch['anchor_items']!=0)
-            rank_output = rank_output*mask
+            # mask = (batch['anchor_items']!=0)
+    #         rank_output = rank_output*mask
             
-            item_lst, rating_lst, output_lst = [],[],[]
-            for i in range(batch['anchor_user'].size(0)):
-                mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
-                items = items = batch['anchor_items'][i][mask].data.cpu().tolist()
-                ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
-                outputs = rank_output[i][mask].data.cpu().tolist()
-                assert len(items)==len(ratings)==len(outputs)
-                item_lst.append(items)
-                rating_lst.append(ratings)
-                output_lst.append(outputs)
-            anchor_users = batch['anchor_user'].data.cpu().tolist()
+    #         item_lst, rating_lst, output_lst = [],[],[]
+    #         for i in range(batch['anchor_user'].size(0)):
+    #             mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
+    #             items = items = batch['anchor_items'][i][mask].data.cpu().tolist()
+    #             ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
+    #             outputs = rank_output[i][mask].data.cpu().tolist()
+    #             assert len(items)==len(ratings)==len(outputs)
+    #             item_lst.append(items)
+    #             rating_lst.append(ratings)
+    #             output_lst.append(outputs)
+    #         anchor_users = batch['anchor_user'].data.cpu().tolist()
             
-            df = pd.DataFrame({'anchor_user':anchor_users,
-                               'anchor_items':item_lst,
-                               'anchor_ratings':rating_lst,
-                               'outputs':output_lst})
+    #         df = pd.DataFrame({'anchor_user':anchor_users,
+    #                            'anchor_items':item_lst,
+    #                            'anchor_ratings':rating_lst,
+    #                            'outputs':output_lst})
             
-            output_df = pd.concat([output_df, df])
+    #         output_df = pd.concat([output_df, df])
             
-    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
-                                                          'anchor_ratings':lambda x:sum(x, start=[]),
-                                                          'outputs':lambda x:sum(x, start=[])}).reset_index()
-    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
-    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
-    output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
-    output_df = output_df.dropna(how='any')
-    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    # output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
+    #                                                       'anchor_ratings':lambda x:sum(x, start=[]),
+    #                                                       'outputs':lambda x:sum(x, start=[])}).reset_index()
+    # output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
+    # output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
+    # output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
+    # output_df = output_df.dropna(how='any')
+    # total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)
             
-    if ((1/total_rmse)*0.1+(total_ndcg)*0.9 > (1/best_rmse)*0.1+(best_ndcg)*0.9): 
-    # if (total_rmse < best_rmse) | (total_ndcg > best_ndcg): 
-        best_ndcg = total_ndcg
+    # if ((1/total_rmse)*0.1+(total_ndcg)*0.9 > (1/best_rmse)*0.1+(best_ndcg)*0.9): 
+    if (total_rmse < best_rmse): 
+        # best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_mae = total_mae
         torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
@@ -190,7 +190,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     else:
         update_cnt += 1
 
-    return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_ndcg, total_rmse, total_mae, update_cnt
+    # return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_ndcg, total_rmse, total_mae, update_cnt
+    return eval_losses.avg, best_rmse, best_mae, total_rmse, total_mae, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     global baseline_rmse, baseline_mae
@@ -235,10 +236,10 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         for step, batch in enumerate(epoch_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
-            rank_output, rating_pred, enc_loss, dec_rmse = model(batch)
+            rank_output, rating_pred, norm = model(batch)
             
-            rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
-            rank_losses.update(rank_loss.item())
+            # rank_loss = metrics.BPR(rank_output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
+            # rank_losses.update(rank_loss.item())
             
             rating_mask = (batch['item_rating'] != 0)
             org_loss = metrics.RMSE(rating_pred, batch['item_rating'], rating_mask)
@@ -252,7 +253,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             #     loss += 10*org_loss
             # elif epoch_rank_loss<5e-1:
             #     loss = org_loss
-            loss = org_loss
+            loss = org_loss+norm
 
             loss.backward()
 
@@ -270,7 +271,8 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             torch.cuda.synchronize()
             
         total_time += (start.elapsed_time(end))
-        valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        valid_loss, best_rmse, best_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        # valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
         lr_scheduler.step(valid_loss) # ReduceLROnPlateau
 
         # Tensorboard recording
@@ -278,12 +280,13 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
         writer.add_scalar('MAE/Test', valid_mae, epoch)
 
-        epoch_rank_loss = rank_losses.avg
+        # epoch_rank_loss = rank_losses.avg
 
-        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
         if epoch > 100:
             break
-        if update_cnt > 20: 
+        if update_cnt > 100: 
             break
     writer.close()
 
@@ -316,7 +319,7 @@ def eval2(model, ds_iter):
         for step, batch in enumerate(epoch_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
-            rank_output, rating_pred, _, _ = model(batch, is_train=False)
+            rank_output, rating_pred, norm = model(batch)
             mask = (batch['item_rating'] != 0)
             rmse = metrics.RMSE(rating_pred, batch['item_rating'], mask).item()
             mae = metrics.MAE(rating_pred, batch['item_rating'], mask)
@@ -417,14 +420,13 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=3, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=5, help="num dec layers")
+    parser.add_argument('--num_layers_enc', type=int, default=1, help="num enc layers")
+    parser.add_argument('--num_layers_dec', type=int, default=1, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=8, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=2, help="MoE number of experts")
-    parser.add_argument('--rating_thres', type=int, default=4, help="explicit rating threshold for creating implicit feedback")
     parser.add_argument('--lr', type=float, default=1e-3) # rating 기준 rw 생성의 경우 default = 1e-3
     # dataset args
-    parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
+    parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
@@ -500,7 +502,7 @@ def main():
     model_config["topk"] = args.topk + int(math.log(args.augs,2))
     
     # model expansion (3) : rating threshold for ranking task
-    model_config["rating_thres"] = args.rating_thres
+    # model_config["rating_thres"] = args.rating_thres
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -519,7 +521,7 @@ def main():
 
     ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
     print(model_config)
-    model = Transformer(**model_config, args=args)
+    model = Transformer(**model_config)
 
     # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
@@ -581,8 +583,8 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer = optimizer,
         mode = 'min',
-        factor = 0.85,
-        patience = 3,
+        factor = 0.9,
+        patience = 5,
         threshold = 1e-2,
         verbose = True
     )

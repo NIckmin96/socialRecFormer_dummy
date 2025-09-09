@@ -50,13 +50,13 @@ ciao_timestamp={
             "num_item": 77524,
             "max_user_degree": 453,
             "max_item_degree": 334,
-            "max_spd_value": 15,
+            # "max_spd_value": 15,
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
-            "dropout": 0.3,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
             "num_layers_enc": 3,
-            "num_layers_dec": 5,
+            "num_layers_dec": 3,
             "n_experts": 8,
             "topk": 2
          },
@@ -88,7 +88,7 @@ epinions={
             "num_item": 261679,
             "max_user_degree": 2026,
             "max_item_degree": 1155,
-            "max_spd_value": 15,
+            # "max_spd_value": 15,
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
