@@ -13,46 +13,39 @@ class ScaledDotProductAttention(nn.Module):
         if is_enc:
             self.spd_param = nn.Parameter(torch.randn((30, 30), dtype=torch.float, requires_grad=True))
     
-    def forward(self, Q, K, V, mask=None, attn_bias=None, last_layer_flag=False, is_dec_layer=False, is_rating=True):
-        rating_pred = None
+    def forward(self, Q, K, V, mask=None):
         # Input is 4-d tensor
-        batch_size, head, length, d_tensor = K.size()
+        d_tensor = K.size(-1)
 
         # 1. Compute similarity by Q.dot(K^T)
         K_T = K.transpose(2, 3)
-        score = torch.matmul(Q, K_T) / math.sqrt(d_tensor)
-        batch_size, head, len_a, len_b = score.size() # enc : len_a(user), len_b(user) / dec : len_a(item), len_b(user)
+        attention = torch.matmul(Q, K_T) / math.sqrt(d_tensor)
 
         # 2. Apply attention mask
         if mask is not None:
-            score = score.masked_fill(mask == 0, -10000) # mask의 값이 0인 위치에 해당하는 attention score값을 -10000으로 변경
-
-        # 3. Apply attention bias (spatial encoding)
-        loss = 0
+            attention_map = attention.masked_fill(mask == 0, -10000) # mask의 값이 0인 위치에 해당하는 attention score값을 -10000으로 변경
         
-        if last_layer_flag:
-            rating_pred = torch.mean(score, dim=1)
+        # if last_layer_flag:
+        #     rating_pred = torch.mean(attention_map, dim=1)
 
         # 3. Pass score to softmax for making [0, 1] range.
-        score = torch.softmax(score, dim=-1)
+        attention_map = torch.softmax(attention_map, dim=-1)
 
         # 4. Dot product with V
-        V = torch.matmul(score, V)
+        V = torch.matmul(attention_map, V)
         
-        return V, loss, rating_pred
+        return V, attention
 
 class MultiHeadAttention(nn.Module):
     """
     Perform multi-head attention
     """
-    def __init__(self, d_model, num_heads, last_layer_flag=False, is_dec_layer=False, is_rating=True):
+    def __init__(self, d_model, num_heads, last_layer_flag=False):
         super(MultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
-        self.attention = ScaledDotProductAttention(not is_dec_layer)
+        self.attention = ScaledDotProductAttention()
         self.last_layer_flag = last_layer_flag
-        self.is_dec_layer = is_dec_layer
-        self.is_rating = is_rating
 
         # Input projection
         self.W_Q = nn.Linear(d_model, d_model)
@@ -61,7 +54,7 @@ class MultiHeadAttention(nn.Module):
 
         self.W_concat = nn.Linear(d_model, d_model)
 
-    def forward(self, Q, K, V, mask=None, attn_bias=None):
+    def forward(self, Q, K, V, mask=None):
         
         # 1. Dot produt with weight matrices
         Q, K, V = self.W_Q(Q), self.W_K(K), self.W_V(V)
@@ -73,16 +66,14 @@ class MultiHeadAttention(nn.Module):
         if mask is not None:
             mask = mask.unsqueeze(1).repeat(1, self.num_heads, 1, 1)
             
-        out, loss, rating_pred = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer, self.is_rating)
+        out, attention = self.attention(Q, K, V, mask)
+        attention = torch.mean(attention, dim=1)
         
         # 4. Concat and pass to linear layer
         out = self.concat(out)
         out = self.W_concat(out)
 
-        if self.last_layer_flag:
-            return out, loss, rating_pred
-        else:
-            return out, loss
+        return out, attention
     
     def split(self, tensor):
         """

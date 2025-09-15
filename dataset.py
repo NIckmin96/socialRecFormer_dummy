@@ -7,20 +7,20 @@ from torch.utils.data import Dataset
 
 class MyDataset(Dataset):
     
-    def __init__(self, dataframe):
+    def __init__(self, total_df, total_df2):
         # anchor
-        self.anchor_user = torch.tensor(dataframe['user_id'].tolist(), dtype=torch.long)
-        self.anchor_degree = torch.tensor(dataframe['anchor_degree'].tolist(), dtype=torch.long)
-        self.anchor_items = torch.tensor(dataframe['anchor_items'].tolist(), dtype=torch.long)        
-        self.anchor_item_degree = torch.tensor(dataframe['anchor_item_degree'].tolist(), dtype=torch.long)
-        self.anchor_ratings = torch.stack(dataframe['anchor_ratings'].tolist()).squeeze(1)
+        self.anchor_user = torch.tensor(total_df2['anchor_user'].tolist(), dtype=torch.long)
+        self.anchor_degree = torch.tensor(total_df2['anchor_degree'].tolist(), dtype=torch.long)
+        self.anchor_items = torch.tensor(total_df2['anchor_items'].tolist(), dtype=torch.long)        
+        self.anchor_item_degree = torch.tensor(total_df2['anchor_item_degree'].tolist(), dtype=torch.long)
+        self.anchor_ratings = torch.stack(total_df2['anchor_ratings'].tolist()).squeeze(1)
         
         # sequence
-        self.user_sequences = torch.tensor(dataframe['user_sequences'].tolist(), dtype=torch.long)
-        self.user_degree = torch.tensor(dataframe['user_degree'].tolist(), dtype=torch.long)
-        self.item_sequences = torch.tensor(dataframe['item_sequences'].tolist(), dtype=torch.long)
-        self.item_degree = torch.tensor(dataframe['item_degree'].tolist(), dtype=torch.long)
-        self.item_rating = torch.stack(dataframe['item_rating'].tolist()).squeeze(1)
+        self.user_sequences = torch.tensor(total_df['user_sequences'].tolist(), dtype=torch.long)
+        self.user_degree = torch.tensor(total_df['user_degree'].tolist(), dtype=torch.long)
+        self.item_sequences = torch.tensor(total_df['item_sequences'].tolist(), dtype=torch.long)
+        self.item_degree = torch.tensor(total_df['item_degree'].tolist(), dtype=torch.long)
+        self.item_rating = torch.stack(total_df['item_rating'].tolist()).squeeze(1)
     
     def __len__(self):
         # 전체 {train/valid/test}.csv의 길이 (dataframe의 전체 row 갯수)

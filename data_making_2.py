@@ -28,7 +28,7 @@ class DatasetMaking:
         print(f"******************************", '\n')
         
         # Shuffle and split Rating dataframe
-        self.rating_train, self.rating_valid, self.rating_test = utils.shuffle_and_split_dataset(data_path, test=args.test_ratio, seed=args.seed, regen=args.regen)
+        self.rating_train, self.rating_valid, self.rating_test = utils.shuffle_and_split_dataset(data_path, df_len=self.rating_df.shape[0], test=args.test_ratio, seed=args.seed, regen=args.regen)
         # self.rating_train, self.rating_test = utils.shuffle_and_split_dataset(data_path, test=args.test_ratio, seed=args.seed, regen=args.regen)
 
         # Filter Social dataframe by Rating dataframe and Split
@@ -42,14 +42,27 @@ class DatasetMaking:
         self.random_walk_test, rw_test_path = utils.generate_social_random_walk_sequence(data_path, self.rating_test, self.social_test, walk_length=args.user_seq_len, augs=1, data_split_seed=args.seed, split='test', regen=args.regen)
         
         # 모델 입력을 위한 최종 데이터셋 구성(rating)
-        self.total_train, self.used_pairs = utils.generate_input_sequence_data(data_path=data_path, rw_df=self.random_walk_train, rating_split=self.rating_train, rating_matrix=self.rating_matrix, user_degree_dic=self.user_degree_dic, product_degree_dic=self.product_degree_dic,
-                                                                               seed=args.seed, split='train', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user, regen=args.regen, neg=args.neg)
+        if args.regen=='train':
+            train_regen=True
+            valid_regen=False
+            test_regen=False
+        elif args.regen in ['all','rw','total']:
+            train_regen=True
+            valid_regen=True
+            test_regen=True
+        else:
+            train_regen=False
+            valid_regen=False
+            test_regen=False
+            
+        self.total_train, self.total_train2, self.used_pairs = utils.generate_input_sequence_data(data_path=data_path, rw_df=self.random_walk_train, rating_split=self.rating_train, rating_matrix=self.rating_matrix, user_degree_dic=self.user_degree_dic, product_degree_dic=self.product_degree_dic,
+                                                                               seed=args.seed, split='train', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user, regen=train_regen, neg=args.neg)
         
-        self.total_valid, _ = utils.generate_input_sequence_data(data_path=data_path, rw_df=self.random_walk_valid, rating_split=self.rating_valid, rating_matrix=self.rating_matrix, user_degree_dic=self.user_degree_dic, product_degree_dic=self.product_degree_dic,
-                                                                 seed=args.seed, split='valid', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user, regen=args.regen, neg=True, used_pairs=self.used_pairs)
+        self.total_valid, self.total_valid2, _ = utils.generate_input_sequence_data(data_path=data_path, rw_df=self.random_walk_valid, rating_split=self.rating_valid, rating_matrix=self.rating_matrix, user_degree_dic=self.user_degree_dic, product_degree_dic=self.product_degree_dic,
+                                                                 seed=args.seed, split='valid', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user, regen=valid_regen, neg=True, used_pairs=self.used_pairs)
         
-        self.total_test, _ = utils.generate_input_sequence_data(data_path=data_path, rw_df=self.random_walk_test, rating_split=self.rating_test, rating_matrix=self.rating_matrix, user_degree_dic=self.user_degree_dic, product_degree_dic=self.product_degree_dic,
-                                                                seed=args.seed, split='test', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user, regen=args.regen, neg=True, used_pairs=self.used_pairs)
+        self.total_test, self.total_test2, _ = utils.generate_input_sequence_data(data_path=data_path, rw_df=self.random_walk_test, rating_split=self.rating_test, rating_matrix=self.rating_matrix, user_degree_dic=self.user_degree_dic, product_degree_dic=self.product_degree_dic,
+                                                                seed=args.seed, split='test', random_walk_len=args.user_seq_len, item_per_user=args.item_per_user, regen=test_regen, neg=True, used_pairs=self.used_pairs)
         
 
         

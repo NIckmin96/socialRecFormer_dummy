@@ -51,23 +51,19 @@ ciao_timestamp={
             "max_user_degree": 453,
             "max_item_degree": 334,
             # "max_spd_value": 15,
+            "num_heads":4,
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim 
             "d_ffn": 256,            # FFN dim
-            "num_heads": 4,
-            "dropout": 0.2,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
-            "num_layers_enc": 3,
-            "num_layers_dec": 3,
-            "n_experts": 8,
-            "topk": 2
+            "dropout": 0.5,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
          },
          "training":{
-            "batch_size":128,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)
+            "batch_size":64,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)
             "optimizer":"adamw",
             "learning_rate":0.01,
             "warmup":40, 
             "lr_decay":"linear",
-            "weight_decay":1e-3,
-            "num_epochs":100,
+            "weight_decay":1e-5,
+            "num_epochs":300,
             "patience":10, 
             "alpha":1,
             "beta":1,
@@ -93,8 +89,6 @@ epinions={
             "d_ffn": 256,            # FFN dim
             "num_heads": 4,
             "dropout": 0.1,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
-            "num_layers_enc": 3,
-            "num_layers_dec": 5,
             "n_experts": 8,
             "topk": 2
          },
