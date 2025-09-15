@@ -17,18 +17,22 @@ class DecoderLayer(nn.Module):
         self.last_layer_flag = last_layer
 
         # Self attention
-        self.norm_self = nn.LayerNorm(d_model)
+        # self.norm_self = nn.LayerNorm(d_model)
+        self.norm_self = nn.BatchNorm1d(150)
         self.attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout_self = nn.Dropout(p=dropout)
         # self attention - moe
-        self.norm_self_moe = nn.LayerNorm(d_model)
+        # self.norm_self_moe = nn.LayerNorm(d_model)
+        self.norm_self_moe = nn.BatchNorm1d(150)
         self.ffn_self = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.moe_self = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.dropout_self_moe = nn.Dropout(p=dropout)
 
         # Cross Attention(1) : user sequences - item sequences 간의 aggregation
-        self.norm_cross1 = nn.LayerNorm(d_model)
-        self.norm_cross1_enc = nn.LayerNorm(d_model)
+        # self.norm_cross1 = nn.LayerNorm(d_model)
+        self.norm_cross1 = nn.BatchNorm1d(150)
+        # self.norm_cross1_enc = nn.LayerNorm(d_model)
+        self.norm_cross1_enc = nn.BatchNorm1d(30)
         self.cross_attention1 = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout_cross1 = nn.Dropout(p=dropout)
         # Cross Attention(1) - moe
@@ -80,7 +84,8 @@ class DecoderLayer(nn.Module):
         # 2-1. Cross Attention(1) : [anchor items - anchor user] 간의 attention
         residual = x
         x = self.norm_cross1(x)
-        enc_output = self.norm_cross1_enc(enc_output)[:,0,:].unsqueeze(1) # anchor user에 대한 representation만
+        # enc_output = self.norm_cross1_enc(enc_output)[:,0,:].unsqueeze(1) # anchor user에 대한 representation만
+        enc_output = self.norm_cross1_enc(enc_output)
         x, attention = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=item_user_mask) # bs x 1 x d
         x = self.dropout_cross1(x)
         x = x + residual 

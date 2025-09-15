@@ -11,21 +11,25 @@ class EncoderLayer(nn.Module):
     def __init__(self, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1):
         super(EncoderLayer, self).__init__()
 
-        self.norm1 = nn.LayerNorm(d_model)
+        # self.norm1 = nn.LayerNorm(d_model)
+        self.norm1 = nn.BatchNorm1d(30)
         self.attention1 = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout1 = nn.Dropout(p=dropout)
 
-        self.norm_moe1 = nn.LayerNorm(d_model)
+        # self.norm_moe1 = nn.LayerNorm(d_model)
+        self.norm_moe1 = nn.BatchNorm1d(30)
         self.moe1 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.ffn1 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.dropout_moe1 = nn.Dropout(p=dropout)
         
-        self.norm2 = nn.LayerNorm(d_model)
+        # self.norm2 = nn.LayerNorm(d_model)
+        self.norm2 = nn.BatchNorm1d(30)
         self.norm2_item = nn.LayerNorm(d_model)
         self.attention2 = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout2 = nn.Dropout(p=dropout)
 
-        self.norm_moe2 = nn.LayerNorm(d_model)
+        # self.norm_moe2 = nn.LayerNorm(d_model)
+        self.norm_moe2 = nn.BatchNorm1d(30)
         self.moe2 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.ffn2 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.dropout_moe2 = nn.Dropout(p=dropout)

@@ -49,11 +49,11 @@ class Transformer(nn.Module):
             topk=topk
         )
     
-    def forward(self, batched_data):
-        enc_output, attention = self.encoder(batched_data)
+    def forward(self, batch):
+        enc_output, attention = self.encoder(batch)
         global_preference = attention
         
-        output = self.decoder(batched_data, enc_output)
+        output = self.decoder(batch, enc_output)
         output = torch.mean(output, dim=-1)
         # frobenius = torch.pow(self.user_embed.node_encoder.weight,2).sum() + torch.pow(self.item_embed.node_encoder.weight,2).sum()
         
