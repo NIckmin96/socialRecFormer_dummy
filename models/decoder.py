@@ -12,7 +12,7 @@ class Decoder(nn.Module):
     Decoder for modeling item representation (in user-item graph),
     and perform rating prediction
     """
-    def __init__(self, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, user_seq_len, item_seq_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -30,6 +30,8 @@ class Decoder(nn.Module):
 
         self.dec_layers = nn.ModuleList(
             [DecoderLayer(
+                user_seq_len = user_seq_len,
+                item_seq_len = item_seq_len,
                 d_model = d_model,
                 d_ffn = d_ffn,
                 num_heads = num_heads,
@@ -48,11 +50,6 @@ class Decoder(nn.Module):
         # Input Encoding: Node it encoding + degree encoding
             # [batch_size, seq_length, item_length]
         device = batched_data['item_list'].device
-        # anchor_user = batched_data['anchor_user'].unsqueeze(1)
-        # anchor_degree = batched_data['anchor_degree'].unsqueeze(1)
-        # anchor_user = batched_data['anchor_user'].unsqueeze(1).expand(*batched_data['user_seq'].size())
-        # anchor_degree = batched_data['anchor_degree'].unsqueeze(1).expand(*batched_data['user_seq'].size())
-        # x_user = self.user_embed(anchor_user, anchor_degree)  # bs x u x d_model
         x_item = self.item_embed(batched_data['anchor_items'], batched_data['anchor_item_degree']) # bs x seq_len_item x d_model
 
         # Generate mask for padded data
@@ -63,15 +60,16 @@ class Decoder(nn.Module):
         for layer in self.dec_layers:
             x_item, attention = layer(x_item, enc_output, item_mask, item_user_mask)
         
+        # Mean
+        output = x_item
+        output = torch.mean(output, dim=-1)
         
         # MF
-        # x_user = self.norm_user(x_user)
-        # x_item = self.norm_item(x_item)
-        # x_user = self.user_embed(batched_data['anchor_user'], batched_data['anchor_degree']).unsqueeze(1)
+        # x_user = enc_output[:,0,:].unsqueeze(1)
         # output = torch.matmul(x_user, x_item.transpose(2,1)).squeeze(1)
         
         # attention의 첫번째 column = user representation과 item representation의 MM
         # output = attention[:,:,0]
-        output = x_item
+        
 
         return output

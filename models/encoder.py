@@ -11,7 +11,7 @@ class Encoder(nn.Module):
     Encoder for modeling user representation (in social graph)
     """
     # def __init__(self, max_degree, num_user, d_model, d_ffn, num_heads, dropout, num_layers):
-    def __init__(self, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, user_seq_len, item_seq_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -31,6 +31,8 @@ class Encoder(nn.Module):
 
         self.enc_layers = nn.ModuleList(
             [EncoderLayer(
+                user_seq_len = user_seq_len,
+                item_seq_len = item_seq_len,
                 d_model = d_model,
                 d_ffn = d_ffn,
                 num_heads = num_heads,
@@ -54,5 +56,8 @@ class Encoder(nn.Module):
         # Encoder layer forward pass (MHA, FFN)
         for layer in self.enc_layers:
             x, attention = layer(x, x_item, user_mask, preference_mask)
+            
+        # MF
+        # attention = torch.matmul(x, x_item.transpose(2,1))
         
         return x, attention
