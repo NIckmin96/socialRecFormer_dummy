@@ -10,7 +10,7 @@ from models.layers.encoding_modules import SocialNodeEncoder, SpatialEncoder, It
 
 class Transformer(nn.Module):
     # def __init__(self, num_user, max_degree_user, num_item, max_degree_item, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec):
-    def __init__(self, user_seq_len, item_seq_len, num_user, max_user_degree, num_item, max_item_degree, d_model, d_ffn, num_heads, dropout, enc_blocks, dec_blocks, n_experts, topk):
+    def __init__(self, user_seq_len, item_seq_len, max_item_len, num_user, max_user_degree, num_item, max_item_degree, d_model, d_ffn, num_heads, dropout, enc_blocks, dec_blocks, n_experts, topk):
         super(Transformer, self).__init__()
 
         # embedding table 선언
@@ -41,7 +41,7 @@ class Transformer(nn.Module):
         # decoder 선언
         self.decoder = Decoder(
             user_seq_len=user_seq_len,
-            item_seq_len=item_seq_len,
+            item_seq_len=max_item_len, # anchor item 최대 길이
             user_embed=self.user_embed,
             item_embed=self.item_embed,
             d_model=d_model,
