@@ -17,27 +17,27 @@ class DecoderLayer(nn.Module):
         self.last_layer_flag = last_layer
 
         # Self attention
-        # self.norm_self = nn.LayerNorm(d_model)
-        self.norm_self = nn.BatchNorm1d(item_seq_len)
+        self.norm_self = nn.LayerNorm(d_model)
+        # self.norm_self = nn.BatchNorm1d(item_seq_len)
         self.attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout_self = nn.Dropout(p=dropout)
         # self attention - moe
-        # self.norm_self_moe = nn.LayerNorm(d_model)
-        self.norm_self_moe = nn.BatchNorm1d(item_seq_len)
+        self.norm_self_moe = nn.LayerNorm(d_model)
+        # self.norm_self_moe = nn.BatchNorm1d(item_seq_len)
         self.ffn_self = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.moe_self = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.dropout_self_moe = nn.Dropout(p=dropout)
 
         # Cross Attention(1) : user sequences - item sequences 간의 aggregation
-        # self.norm_cross1 = nn.LayerNorm(d_model)
-        self.norm_cross1 = nn.BatchNorm1d(item_seq_len)
-        # self.norm_cross1_enc = nn.LayerNorm(d_model)
-        self.norm_cross1_enc = nn.BatchNorm1d(user_seq_len)
+        self.norm_cross1 = nn.LayerNorm(d_model)
+        # self.norm_cross1 = nn.BatchNorm1d(item_seq_len)
+        self.norm_cross1_enc = nn.LayerNorm(d_model)
+        # self.norm_cross1_enc = nn.BatchNorm1d(user_seq_len)
         self.cross_attention1 = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout_cross1 = nn.Dropout(p=dropout)
         # Cross Attention(1) - moe
-        # self.norm_cross1_moe = nn.LayerNorm(d_model)
-        self.norm_cross1_moe = nn.BatchNorm1d(item_seq_len)
+        self.norm_cross1_moe = nn.LayerNorm(d_model)
+        # self.norm_cross1_moe = nn.BatchNorm1d(item_seq_len)
         self.dropout_cross1_moe = nn.Dropout(p=dropout)
         self.ffn_cross1 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.moe_cross1 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
@@ -147,4 +147,4 @@ class DecoderLayer(nn.Module):
         # x = self.dropout_cross2_moe(x)
         # x = x + residual
         
-        return x, attention
+        return x, attention, enc_output

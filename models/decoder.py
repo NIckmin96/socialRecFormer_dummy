@@ -42,9 +42,9 @@ class Decoder(nn.Module):
             ) for _ in range(num_layers)]
         )
 
-        self.norm_user = nn.LayerNorm(d_model)
-        self.norm_item = nn.LayerNorm(d_model)
-        self.activation = nn.LeakyReLU()
+        # self.norm_user = nn.LayerNorm(d_model)
+        # self.norm_item = nn.LayerNorm(d_model)
+        # self.activation = nn.LeakyReLU()
     
     def forward(self, batched_data, enc_output):
         # Input Encoding: Node it encoding + degree encoding
@@ -58,15 +58,15 @@ class Decoder(nn.Module):
             
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
-            x_item, attention = layer(x_item, enc_output, item_mask, item_user_mask)
+            x_item, attention, x_user = layer(x_item, enc_output, item_mask, item_user_mask)
         
         # Mean
-        output = x_item
-        output = torch.mean(output, dim=-1)
+        # output = x_item
+        # output = torch.mean(output, dim=-1)
         
         # MF
-        # x_user = enc_output[:,0,:].unsqueeze(1)
-        # output = torch.matmul(x_user, x_item.transpose(2,1)).squeeze(1)
+        x_user = x_user[:,0,:].unsqueeze(1)
+        output = torch.matmul(x_user, x_item.transpose(2,1)).squeeze(1)
         
         # attention의 첫번째 column = user representation과 item representation의 MM
         # output = attention[:,:,0]

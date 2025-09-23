@@ -94,7 +94,7 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
     # filter again
     total_users = set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).intersection(set(rating_df.user_id.unique()))
     rating_df = rating_df[rating_df.user_id.isin(total_users)]
-    trust_df = trust_df[trust_df.user_id_1.isin(total_users)|trust_df.user_id_2.isin(total_users)]
+    trust_df = trust_df[trust_df.user_id_1.isin(total_users)&trust_df.user_id_2.isin(total_users)]
     
     # Generate user id mapping table
     total_users = sorted(set(trust_df.user_id_1.unique()).union(set(trust_df.user_id_2.unique())).union(set(rating_df.user_id.unique())))
@@ -297,16 +297,13 @@ def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame
 
     return random_walk_train, random_walk_valid, random_walk_test
     
-def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic, product_degree_dic, rating_matrix, seed, split, random_walk_len, item_per_user, max_item_len, regen, neg, used_pairs:dict={}):
-    # print(split, neg)
+def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic, product_degree_dic, rating_matrix, seed, split, random_walk_len, item_per_user, min_item_len, regen, neg, used_pairs:dict={}):
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
     if neg==True:
         total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{rw_df.shape[0]}_{split}_neg.pkl"
-        total_path2 = data_path + f"/rank_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{rw_df.shape[0]}_{split}_neg.pkl"
     else:
         total_path = data_path + f"/sequence_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{rw_df.shape[0]}_{split}_non_neg.pkl"
-        total_path2 = data_path + f"/rank_data_seed_{seed}_walk_{random_walk_len}_itemlen_{item_seq_len}_{rw_df.shape[0]}_{split}_non_neg.pkl"
     
     # total_df 재생성 여부 확인
     if os.path.isfile(total_path)&(not regen):
@@ -314,7 +311,6 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         print(total_path)
         print(f"Loading {split} total df(input_sequence_data)...")
         total_df = pd.read_pickle(total_path)
-        total_df2 = pd.read_pickle(total_path2)
         print(f"total df dir : {total_path}")
     
     else:
@@ -368,7 +364,7 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
             neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))                
             anchor_items.extend(neg_samples)
             
-            np.random.seed(42)
+            np.random.seed(seed)
             np.random.shuffle(anchor_items)
             
             assert len(anchor_items)>=10
@@ -379,56 +375,55 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         # str type으로 저장된 데이터 list로 변환 
         tqdm.pandas()
         total_df = pd.DataFrame()
-        total_df2 = pd.DataFrame()
         print("Processing Default information ...")
         total_df['user_sequences'] = rw_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
         total_df['user_degree'] = rw_df.apply(lambda x: str_to_list(x['degree']), axis=1)
         total_df['item_sequences'] = total_df['user_sequences'].progress_map(map_user_items) # item mapping + 이전 split에서 사용한 pair 제거
         total_df['item_degree'] = total_df['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
-        total_df2['anchor_user'] = total_df['user_sequences'].progress_map(lambda x:x[0])
-        total_df2['anchor_degree'] = total_df2['anchor_user'].progress_map(lambda x:user_degree_dic[x])
-        total_df2['anchor_items'] = total_df2['anchor_user'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else None)
-        # iteraction item 아무것도 없는 경우 drop
-        total_df2.dropna(subset='anchor_items', inplace=True)
         
-        
-        # negative sampling
-        if neg:
-            print("Negative Sampling...")
-            total_df2[['anchor_items','neg_samples']] = total_df2[['anchor_user','anchor_items']].progress_apply(lambda x:add_negs(x['anchor_user'],x['anchor_items']), axis=1)
-        
-        total_df2['anchor_item_degree'] = total_df2['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
-
+        # total df
+        print("Processing Total DF...")
         # slice and pad
-        print("Processing Padding & Slicing ...")
         item_len = total_df['item_sequences'].apply(len).max()
         total_df['item_sequences'] = total_df['item_sequences'].progress_map(lambda x:slice_and_pad_list(x,item_len))
         total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_len))
         total_df = total_df.explode(['item_sequences','item_degree'])
-        
-        # item_len = total_df2['anchor_items'].apply(len).max()
-        total_df2['anchor_items'] = total_df2['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,max_item_len))
-        total_df2['anchor_item_degree'] = total_df2['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,max_item_len))
-        total_df2 = total_df2.explode(['anchor_items','anchor_item_degree'])
-        
         # rating matrix
         total_df['item_rating'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray()), axis=1)
-        total_df2['anchor_ratings'] = total_df2.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['anchor_user'],:][:,x['anchor_items']].toarray()), axis=1)        
         
+        total_df['anchor_user'] = total_df['user_sequences'].progress_map(lambda x:x[0])
+        total_df['anchor_degree'] = total_df['anchor_user'].progress_map(lambda x:user_degree_dic[x])
+        total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else None)
+        # train/valid/test 중 Minimum보다 큰 경우, random sample [tmp]
+        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:np.random.choice(x, min(len(x),min_item_len), replace=False).tolist())
         
-        total_df = total_df[['user_sequences','user_degree','item_sequences','item_degree','item_rating']]
+        # iteraction item 아무것도 없는 경우 drop
+        total_df.dropna(subset='anchor_items', inplace=True)
+        # negative sampling
         if neg:
-            total_df2 = total_df2[['anchor_user','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree','neg_samples']]
+            print("Negative Sampling...")
+            total_df[['anchor_items','neg_samples']] = total_df[['anchor_user','anchor_items']].progress_apply(lambda x:add_negs(x['anchor_user'],x['anchor_items']), axis=1)
+        total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
+        # slice and pad
+        # item_len = total_df['anchor_items'].apply(len).max()
+        # total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,max_item_len))
+        # total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,max_item_len))
+        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
+        total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
+        total_df = total_df.explode(['anchor_items','anchor_item_degree'])
+        # rating matrix
+        total_df['anchor_ratings'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['anchor_user'],:][:,x['anchor_items']].toarray()), axis=1)        
+        
+        if neg:
+            total_df = total_df[['user_sequences','user_degree','item_sequences','item_degree','item_rating',
+                'anchor_user','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree','neg_samples']]
         else:
-            total_df2 = total_df2[['anchor_user','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree']]
+            total_df = total_df[['user_sequences','user_degree','item_sequences','item_degree','item_rating',
+                                 'anchor_user','anchor_degree','anchor_items','anchor_ratings','anchor_item_degree']]
 
         with open(total_path, "wb") as file:
             pickle.dump(total_df, file)
-            
-        with open(total_path2, "wb") as file:
-            pickle.dump(total_df2, file)
 
         print(f"# of total {split} : {len(total_df)}")
-        
-    assert total_df.shape[0]==total_df2.shape[0]
-    return total_df, total_df2, used_pairs
+    
+    return total_df, used_pairs

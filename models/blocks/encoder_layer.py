@@ -70,4 +70,4 @@ class EncoderLayer(nn.Module):
         x = self.dropout_moe2(x)
         x = x + residual
 
-        return x, attention
+        return x, attention, x_item

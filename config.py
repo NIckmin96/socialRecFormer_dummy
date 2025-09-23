@@ -40,11 +40,6 @@ ciao={
 
 ciao_timestamp={  
          # dataset의 전체 길이 (기록 및 확인용) (train:val:test = 8:1:1)
-         "dataset":{
-            "train":53393,
-            "dev":8489,
-            "test":8428,
-         },
          "model":{
             "num_heads":2,
             "d_model": 64,          # MHA dim (Linear modules in At1e-5tention Network) & Embedding dim 
@@ -58,11 +53,6 @@ ciao_timestamp={
      }
 
 epinions={
-         "dataset":{
-             "train":560000,
-             "dev":38000,
-             "test":38000,
-         },
          "model":{
             "num_heads":2,
             "d_model": 64,          # MHA dim (Linear modules in At1e-5tention Network) & Embedding dim 
@@ -79,15 +69,12 @@ yelp={
          "model":{
             "d_model": 64,          # MHA dim (Linear modules in Attention Network) & Embedding dim num_workers
             "d_ffn": 256,            # FFN dim
-            "num_heads": 4,
+            "num_heads": 2,
             "dropout": 0.3,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
-            "num_layers_enc": 3,
-            "num_layers_dec": 5,
             "n_experts": 8,
             "topk": 2
          },
          "training":{
-            "batch_size":128,        # total_train_step: 835 (1 epoch 당 `len(train_dataset) / batch_size`)
             "weight_decay":1e-2,
             "num_epochs":300,
          },

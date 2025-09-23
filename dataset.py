@@ -67,8 +67,8 @@ class EncoderDataset(Dataset):
         
 class DecoderDataset(Dataset):
     
-    def __init__(self, total_df):
         # sequence
+    def __init__(self, total_df):
         self.user_sequences = torch.tensor(total_df['user_sequences'].tolist(), dtype=torch.long)
         self.user_degree = torch.tensor(total_df['user_degree'].tolist(), dtype=torch.long)
         self.item_sequences = torch.tensor(total_df['item_sequences'].tolist(), dtype=torch.long)

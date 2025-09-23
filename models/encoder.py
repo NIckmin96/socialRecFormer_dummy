@@ -42,9 +42,9 @@ class Encoder(nn.Module):
             ) for _ in range(num_layers)]
         )
         
-        self.norm_user = nn.LayerNorm(d_model)
-        self.norm_item = nn.LayerNorm(d_model)
-        self.activation = nn.LeakyReLU()
+        # self.norm_user = nn.LayerNorm(d_model)
+        # self.norm_item = nn.LayerNorm(d_model)
+        # self.activation = nn.LeakyReLU()
     
     def forward(self, batched_data):
         x = self.user_embed(batched_data['user_seq'], batched_data['user_degree'])
@@ -55,7 +55,7 @@ class Encoder(nn.Module):
 
         # Encoder layer forward pass (MHA, FFN)
         for layer in self.enc_layers:
-            x, attention = layer(x, x_item, user_mask, preference_mask)
+            x, attention, x_item = layer(x, x_item, user_mask, preference_mask)
             
         # MF
         # attention = torch.matmul(x, x_item.transpose(2,1))
