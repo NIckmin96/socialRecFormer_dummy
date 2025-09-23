@@ -12,7 +12,7 @@ class Decoder(nn.Module):
     Decoder for modeling item representation (in user-item graph),
     and perform rating prediction
     """
-    def __init__(self, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, user_seq_len, item_seq_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -27,30 +27,11 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.user_embed = user_embed
         self.item_embed = item_embed
-        
-        # # item embedding vector 생성
-        # self.item_embed = ItemNodeEncoder(
-        #     num_nodes = num_item,
-        #     max_degree = max_item_degree,
-        #     d_model = d_model
-        # )
-        # # anchor user embedding vector 생성
-        # self.anchor_embed = SocialNodeEncoder(
-        #     num_nodes = num_user,
-        #     max_degree = max_user_degree,
-        #     d_model = d_model
-        # )
-        
-        # len_item_seq = args.user_seq_len*args.item_per_user
-        # # Rating embedding vector 생성
-        # self.rating_embed = RatingEncoder(num_user, len_item_seq, d_model)
-        # # Ranking attention bias(cross-attn1에 사용)
-        # self.ranking_bias = RankBias(rating_thres=rating_thres)
-        # # Rating attention bias(cross-attn2에 사용)
-        # self.rating_bias = RatingBias(num_heads=num_heads)
 
         self.dec_layers = nn.ModuleList(
             [DecoderLayer(
+                user_seq_len = user_seq_len,
+                item_seq_len = item_seq_len,
                 d_model = d_model,
                 d_ffn = d_ffn,
                 num_heads = num_heads,
@@ -58,55 +39,37 @@ class Decoder(nn.Module):
                 topk = topk,
                 dropout = dropout,
                 last_layer = False,
-                is_dec_layer = True
-            ) for _ in range(num_layers-1)]
+            ) for _ in range(num_layers)]
         )
 
-        # rating prediction layer(=last layer)
-        self.pred_layer = DecoderLayer(
-            d_model = d_model,
-            d_ffn = d_ffn,
-            num_heads = num_heads,
-            dropout = dropout,
-            last_layer = True,
-            is_dec_layer = True
-        )
+        # self.norm_user = nn.LayerNorm(d_model)
+        # self.norm_item = nn.LayerNorm(d_model)
+        # self.activation = nn.LeakyReLU()
     
     def forward(self, batched_data, enc_output):
         # Input Encoding: Node it encoding + degree encoding
             # [batch_size, seq_length, item_length]
         device = batched_data['item_list'].device
-        x_item = self.item_embed(batched_data['item_list'], batched_data['item_degree']) # bs x seq_len_item x d_model
-        x_anchor = self.user_embed(batched_data['anchor_user'], batched_data['anchor_degree']).unsqueeze(1)  # bs x 1 x d_model
-        x_anchor_i = self.item_embed(batched_data['anchor_items'], batched_data['anchor_item_degree']) # bs x seq_len_item x d_model
-        # rating_x = self.rating_embed(batched_data, is_train)
-        # device = rating_x.device
+        x_item = self.item_embed(batched_data['anchor_items'], batched_data['anchor_item_degree']) # bs x seq_len_item x d_model
 
         # Generate mask for padded data
-        self_attn_mask = generate_attn_pad_mask(batched_data['item_list'], batched_data['item_list']).to(device)    # [batch_size, seq_len_item, seq_len_item]
-        cross_attn_mask_1 = generate_attn_pad_mask(batched_data['item_list'], batched_data['user_seq']).to(device) # [batch_size, seq_len_item, seq_len_user]
-        cross_attn_mask_2 = generate_attn_pad_mask(batched_data['anchor_items'], batched_data['anchor_user'].unsqueeze(1)).to(device) # [bs x i x 1]
-
-        # ranking_bias = self.ranking_bias(batched_data['imp_fdback'])
-        # rating_bias = self.rating_bias(batched_data['item_rating'])
+        item_mask = generate_attn_pad_mask(batched_data['anchor_items'], batched_data['anchor_items']).to(device)    # [batch_size, seq_len_item, seq_len_item]
+        item_user_mask = generate_attn_pad_mask(batched_data['anchor_items'], batched_data['anchor_user'].unsqueeze(1)).to(device) # [batch_size, seq_len_item, seq_len_user]
             
-        rmse_losses = []
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
-            # x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, None, None)
-            x_item, rmse_loss, _ = layer(x_item, x_anchor, x_anchor_i, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2)
-            rmse_losses.append(rmse_loss)
+            x_item, attention, x_user = layer(x_item, enc_output, item_mask, item_user_mask)
         
-        # Pass to prediction layer
-        # output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, rating_x, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2, None, None)
-        output, rmse_loss, rating_pred = self.pred_layer(x_item, x_anchor, x_anchor_i, enc_output, self_attn_mask, cross_attn_mask_1, cross_attn_mask_2)
-        # rmse_losses.append(rmse_loss)
+        # Mean
+        # output = x_item
+        # output = torch.mean(output, dim=-1)
         
-        # [bs, i, d] => [bs, i]
-        output = torch.mean(output, dim=-1)
-        # rank_logits = F.sigmoid(output)
-        # rank_logits = F.softmax(output, dim=-1)
+        # MF
+        x_user = x_user[:,0,:].unsqueeze(1)
+        output = torch.matmul(x_user, x_item.transpose(2,1)).squeeze(1)
+        
+        # attention의 첫번째 column = user representation과 item representation의 MM
+        # output = attention[:,:,0]
+        
 
-        del self_attn_mask, cross_attn_mask_1, cross_attn_mask_2
-
-        return output, rating_pred, sum(rmse_losses)/len(rmse_losses)
+        return output

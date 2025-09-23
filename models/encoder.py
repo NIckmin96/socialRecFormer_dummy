@@ -11,7 +11,7 @@ class Encoder(nn.Module):
     Encoder for modeling user representation (in social graph)
     """
     # def __init__(self, max_degree, num_user, d_model, d_ffn, num_heads, dropout, num_layers):
-    def __init__(self, user_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, user_seq_len, item_seq_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -27,9 +27,12 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.user_embed = user_embed
+        self.item_embed = item_embed
 
         self.enc_layers = nn.ModuleList(
             [EncoderLayer(
+                user_seq_len = user_seq_len,
+                item_seq_len = item_seq_len,
                 d_model = d_model,
                 d_ffn = d_ffn,
                 num_heads = num_heads,
@@ -38,21 +41,23 @@ class Encoder(nn.Module):
                 dropout = dropout
             ) for _ in range(num_layers)]
         )
+        
+        # self.norm_user = nn.LayerNorm(d_model)
+        # self.norm_item = nn.LayerNorm(d_model)
+        # self.activation = nn.LeakyReLU()
     
     def forward(self, batched_data):
         x = self.user_embed(batched_data['user_seq'], batched_data['user_degree'])
-
+        x_item = self.item_embed(batched_data['item_list'], batched_data['item_degree'])
         # Generate mask for padded data
-        src_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
-        # print(src_mask[src_mask==0].shape)
-        # attn_bias = self.spatial_pos_bias(batched_data)
+        user_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
+        preference_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['item_list'])
 
-        losses = []
         # Encoder layer forward pass (MHA, FFN)
         for layer in self.enc_layers:
-            x, spd_loss = layer(x, src_mask, None)
-            # x, spd_loss = layer(x, src_mask, None)
-            losses.append(spd_loss)
-
+            x, attention, x_item = layer(x, x_item, user_mask, preference_mask)
+            
+        # MF
+        # attention = torch.matmul(x, x_item.transpose(2,1))
         
-        return x, sum(losses)/len(losses)
+        return x, attention
