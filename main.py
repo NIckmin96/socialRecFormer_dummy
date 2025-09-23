@@ -442,7 +442,6 @@ def get_args():
 
 def main():
     global device, args
-    global device, args
 
     args = get_args()
 
