@@ -650,6 +650,13 @@ def main():
         model.load_state_dict(checkpoint["model_state_dict"])
         print("loading the best model from: " + checkpoint_path)
         eval(model, ds_iter)
+        ############################################################################
+        with torch.no_grad():
+            batch = next(iter(ds_iter['train']))
+            batch = {k:v.to(device) for k,v in batch.items()}
+            output, global_preference = model(batch)
+            torch.save(model.encoder.global_attention.cpu(), 'global_attn_abl.pt') # attention map 저장     
+        ############################################################################
 
     torch.cuda.empty_cache()
 

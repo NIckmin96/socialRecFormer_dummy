@@ -74,6 +74,6 @@ class Encoder(nn.Module):
         local_preference = self.pred_layer(x, x_anchor_items, local_mask)
             
         # MF
-        # attention = torch.matmul(x, x_item.transpose(2,1))
+        attention = torch.matmul(x, x_item.transpose(2,1))
         
         return global_preference, local_preference
