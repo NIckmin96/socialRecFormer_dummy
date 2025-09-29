@@ -42,22 +42,20 @@ class Encoder(nn.Module):
             ) for _ in range(num_layers)]
         )
         
-        # self.norm_user = nn.LayerNorm(d_model)
-        # self.norm_item = nn.LayerNorm(d_model)
-        # self.activation = nn.LeakyReLU()
     
     def forward(self, batched_data):
         x = self.user_embed(batched_data['user_seq'], batched_data['user_degree'])
         x_item = self.item_embed(batched_data['item_list'], batched_data['item_degree'])
         # Generate mask for padded data
-        user_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
-        preference_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['item_list'])
+        self.user_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['user_seq'])
+        self.preference_mask = generate_attn_pad_mask(batched_data['user_seq'], batched_data['item_list'])
 
         # Encoder layer forward pass (MHA, FFN)
         for layer in self.enc_layers:
-            x, attention, x_item = layer(x, x_item, user_mask, preference_mask)
+            x, attention, x_item = layer(x, x_item, self.user_mask, self.preference_mask)
             
+        self.global_attention = attention
         # MF
-        # attention = torch.matmul(x, x_item.transpose(2,1))
+        global_preference = torch.matmul(x, x_item.transpose(2,1))
         
-        return x, attention
+        return x, global_preference

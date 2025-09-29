@@ -137,13 +137,40 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
     metrics = Metrics()
     # Training step
     for epoch in range(total_epochs):
-    # for epoch in range(total_epochs):
         sub_losses = AverageMeter()
-        
         # encoder 학습
         enc_iterator = tqdm(ds_iter['train_enc'], desc="Encoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(enc_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
+            ######################### 학습 전, attention map 저장 #########################
+            if epoch==0 and step==0:
+                with torch.no_grad():
+                    enc_output, global_preference = model.encoder(batch)
+                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_0.pt') # attention map 저장
+                    torch.save(batch['item_rating'].cpu(), 'batch_global_rating.pt')
+                    torch.save(batch['user_seq'].cpu(), 'batch_user_seq.pt')
+                    torch.save(batch['item_list'].cpu(), 'batch_item_seq.pt')
+                    
+            elif epoch==50 and step==0:
+                with torch.no_grad():
+                    enc_output, global_preference = model.encoder(batch)
+                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_50.pt') # attention map 저장
+                    
+            elif epoch==100 and step==0:
+                with torch.no_grad():
+                    enc_output, global_preference = model.encoder(batch)
+                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_100.pt') # attention map 저장
+                    
+            elif epoch==150 and step==0:
+                with torch.no_grad():
+                    enc_output, global_preference = model.encoder(batch)
+                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_150.pt') # attention map 저장
+            
+            elif epoch==200 and step==0:
+                with torch.no_grad():
+                    enc_output, global_preference = model.encoder(batch)
+                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_200.pt') # attention map 저장
+            ############################################################################
             # forward pass
             enc_output, global_preference = model.encoder(batch)
 
@@ -152,9 +179,9 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
             sub_losses.update(sub_loss.item())
             
             nn.utils.clip_grad_value_(model.encoder.parameters(), clip_value=1) # Gradient Clipping
+            optimizer.zero_grad()            
             sub_loss.backward()
             optimizer.step()
-            optimizer.zero_grad()            
             enc_iterator.set_description(
                         "Encoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(enc_iterator), sub_losses.avg))
             
@@ -165,7 +192,7 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
         else:
             lr_scheduler.step()
             
-        print(f"Epoch {epoch:03d} || Sub Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
+        print(f"Epoch {epoch:03d} || Encoder Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} ||\n")
         if update_cnt==30: 
             break
 
@@ -267,9 +294,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             
             
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
+            optimizer.zero_grad()            
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()            
             dec_iterator.set_description(
                         "Decoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(dec_iterator), losses.avg))
             
@@ -381,8 +408,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
         torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
         print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test MAE = {total_mae:.6f}, test NDCG@10 = {best_ndcg:.6f}')
         update_cnt = 0
-    # elif (total_rmse-best_rmse)<=0.01:
-    #     pass
+    elif total_rmse <= best_rmse:
+        pass
     else:
         update_cnt += 1
 
