@@ -28,6 +28,7 @@ class Transformer(nn.Module):
         self.encoder = Encoder(
             user_seq_len=user_seq_len,
             item_seq_len=item_seq_len,
+            min_item_len=min_item_len,
             user_embed=self.user_embed,
             item_embed=self.item_embed,
             d_model=d_model,

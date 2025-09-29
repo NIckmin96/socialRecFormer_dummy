@@ -15,12 +15,6 @@ class EncoderLayer(nn.Module):
         self.norm1 = nn.BatchNorm1d(user_seq_len)
         self.attention1 = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout1 = nn.Dropout(p=dropout)
-
-        # self.norm_moe1 = nn.LayerNorm(d_model)
-        self.norm_moe1 = nn.BatchNorm1d(user_seq_len)
-        self.moe1 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
-        self.ffn1 = FeedForwardNetwork(d_model, d_ffn, dropout)
-        self.dropout_moe1 = nn.Dropout(p=dropout)
         
         # self.norm2 = nn.LayerNorm(d_model)
         self.norm2 = nn.BatchNorm1d(user_seq_len)
@@ -43,15 +37,6 @@ class EncoderLayer(nn.Module):
         # Add & Norm
         x = self.dropout1(x)
         x = x + residual
-
-        # # 1-1. FFN
-        # residual = x
-        # x = self.norm_moe1(x)
-        # # x = self.ffn1(x)
-        # x = self.moe1(x)
-        # # Add & Norm
-        # x = self.dropout_moe1(x)
-        # x = x + residual
         
         # 2. user-item attention(여기서 global rating prediction ouptut으로 뽑을수있게)
         residual = x
@@ -80,33 +65,31 @@ class PredLayer(nn.Module):
     def __init__(self, user_seq_len, item_seq_len, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1):
         super(PredLayer, self).__init__()
 
-        # self.norm1 = nn.LayerNorm(d_model)
         self.norm = nn.BatchNorm1d(user_seq_len)
+        self.norm_item = nn.BatchNorm1d(item_seq_len)
         self.attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout = nn.Dropout(p=dropout)
-
-        # self.norm_moe1 = nn.LayerNorm(d_model)
-        # self.norm_moe = nn.BatchNorm1d(user_seq_len)
-        # self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
-        # self.ffn = FeedForwardNetwork(d_model, d_ffn, dropout)
-        # self.dropout_moe = nn.Dropout(p=dropout)
+        
+        self.norm_moe = nn.BatchNorm1d(user_seq_len)
+        self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
+        self.dropout_moe = nn.Dropout(p=dropout)
     
     def forward(self, x, x_item, preference_mask):
         # 1. Perform self attention
         residual = x
         x = self.norm(x)
-        output, attention = self.attention(Q=x, K=x_item, V=x_item, mask=preference_mask)
-        # # Add & Norm
-        # x = self.dropout(x)
-        # x = x + residual
+        x_item = self.norm_item(x_item)
+        x, attention = self.attention(Q=x, K=x_item, V=x_item, mask=preference_mask)
+        x = self.dropout(x)
+        x = x + residual
+        
+        # 2-1. MoE/FFN
+        residual = x
+        x = self.norm_moe(x)
+        x = self.moe(x)
+        # Add & Norm
+        x = self.dropout_moe(x)
+        x = x + residual
 
-        # # 1-1. MoE
-        # residual = x
-        # x = self.norm_moe(x)
-        # # x = self.ffn1(x)
-        # x = self.moe(x)
-        # # Add & Norm
-        # x = self.dropout_moe(x)
-        # x = x + residual
-
-        return attention[:,0,:]
+        # return attention[:,0,:]
+        return x[:,0,:]

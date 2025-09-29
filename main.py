@@ -292,15 +292,14 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     total_mae /= (step+1)
             
     if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
-    # if total_rmse < best_rmse: 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_mae = total_mae
         torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
         print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test MAE = {total_mae:.6f}, test NDCG@10 = {best_ndcg:.6f}')
         update_cnt = 0
-    # elif (total_rmse-best_rmse)<=0.01:
-    #     pass
+    elif total_rmse<=best_rmse:
+        pass
     else:
         update_cnt += 1
 
@@ -654,8 +653,8 @@ def main():
         with torch.no_grad():
             batch = next(iter(ds_iter['train']))
             batch = {k:v.to(device) for k,v in batch.items()}
-            output, global_preference = model(batch)
-            torch.save(model.encoder.global_attention.cpu(), 'global_attn_abl.pt') # attention map 저장     
+            _, _ = model(batch)
+            torch.save(model.encoder.global_attention.cpu(), 'global_attn_abl2.pt') # attention map 저장     
         ############################################################################
 
     torch.cuda.empty_cache()

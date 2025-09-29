@@ -11,7 +11,7 @@ class Encoder(nn.Module):
     Encoder for modeling user representation (in social graph)
     """
     # def __init__(self, max_degree, num_user, d_model, d_ffn, num_heads, dropout, num_layers):
-    def __init__(self, user_seq_len, item_seq_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, user_seq_len, item_seq_len, min_item_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -44,7 +44,7 @@ class Encoder(nn.Module):
 
         self.pred_layer = PredLayer(
             user_seq_len = user_seq_len,
-            item_seq_len = item_seq_len,
+            item_seq_len = min_item_len,
             d_model = d_model,
             d_ffn = d_ffn,
             num_heads = num_heads,
@@ -52,10 +52,6 @@ class Encoder(nn.Module):
             topk = topk,
             dropout = dropout
         )
-        
-        # self.norm_user = nn.LayerNorm(d_model)
-        # self.norm_item = nn.LayerNorm(d_model)
-        # self.activation = nn.LeakyReLU()
     
     def forward(self, batched_data):
         x = self.user_embed(batched_data['user_seq'], batched_data['user_degree'])
@@ -71,9 +67,10 @@ class Encoder(nn.Module):
         for layer in self.enc_layers:
             x, global_preference, x_item = layer(x, x_item, user_mask, preference_mask)
 
-        local_preference = self.pred_layer(x, x_anchor_items, local_mask)
-            
+        self.global_attention = global_preference
+        output = self.pred_layer(x, x_anchor_items, local_mask)
+        
         # MF
-        attention = torch.matmul(x, x_item.transpose(2,1))
+        local_preference = torch.matmul(output.unsqueeze(1), x_anchor_items.transpose(2,1)).squeeze(1)
         
         return global_preference, local_preference
