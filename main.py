@@ -318,7 +318,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
         # epoch_rank_loss = rank_losses.avg
 
-        print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Sub Loss: {sub_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
         if update_cnt > 20: 
@@ -672,8 +672,10 @@ def main():
     name_n_dec = str(model_config['dec_blocks'])
     name_d_model = str(model_config['d_model'])
     name_d_ffn = str(model_config['d_ffn'])
-    name_lr = str(training_config['lr'])
-    name_lr_enc = str(training_config['lr_enc'])
+    # name_lr = str(training_config['lr'])
+    name_lr = str(args.lr)
+    # name_lr_enc = str(training_config['lr_enc'])
+    name_lr_enc = str(args.lr_enc)
     name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_lr, args.dec_scheduler])
     enc_name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_lr_enc, args.enc_scheduler])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
@@ -752,7 +754,8 @@ def main():
         optimizer = torch.optim.AdamW(
             # model.decoder.parameters(),
             model.parameters(),
-            lr = training_config['lr'],
+            # lr = training_config['lr'],
+            lr = args.lr,
             betas=[0.9,0.999],
             weight_decay=training_config['weight_decay'])
                     
