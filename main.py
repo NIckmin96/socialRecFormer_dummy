@@ -142,35 +142,35 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
         enc_iterator = tqdm(ds_iter['train_enc'], desc="Encoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(enc_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
-            ######################### 학습 전, attention map 저장 #########################
-            if epoch==0 and step==0:
-                with torch.no_grad():
-                    enc_output, global_preference = model.encoder(batch)
-                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_0.pt') # attention map 저장
-                    torch.save(batch['item_rating'].cpu(), 'batch_global_rating.pt')
-                    torch.save(batch['user_seq'].cpu(), 'batch_user_seq.pt')
-                    torch.save(batch['item_list'].cpu(), 'batch_item_seq.pt')
+            # ######################### 학습 전, attention map 저장 #########################
+            # if epoch==0 and step==0:
+            #     with torch.no_grad():
+            #         enc_output, global_preference = model.encoder(batch)
+            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_0.pt') # attention map 저장
+            #         torch.save(batch['item_rating'].cpu(), 'batch_global_rating.pt')
+            #         torch.save(batch['user_seq'].cpu(), 'batch_user_seq.pt')
+            #         torch.save(batch['item_list'].cpu(), 'batch_item_seq.pt')
                     
-            elif epoch==50 and step==0:
-                with torch.no_grad():
-                    enc_output, global_preference = model.encoder(batch)
-                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_50.pt') # attention map 저장
+            # elif epoch==50 and step==0:
+            #     with torch.no_grad():
+            #         enc_output, global_preference = model.encoder(batch)
+            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_50.pt') # attention map 저장
                     
-            elif epoch==100 and step==0:
-                with torch.no_grad():
-                    enc_output, global_preference = model.encoder(batch)
-                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_100.pt') # attention map 저장
+            # elif epoch==100 and step==0:
+            #     with torch.no_grad():
+            #         enc_output, global_preference = model.encoder(batch)
+            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_100.pt') # attention map 저장
                     
-            elif epoch==150 and step==0:
-                with torch.no_grad():
-                    enc_output, global_preference = model.encoder(batch)
-                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_150.pt') # attention map 저장
+            # elif epoch==150 and step==0:
+            #     with torch.no_grad():
+            #         enc_output, global_preference = model.encoder(batch)
+            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_150.pt') # attention map 저장
             
-            elif epoch==200 and step==0:
-                with torch.no_grad():
-                    enc_output, global_preference = model.encoder(batch)
-                    torch.save(model.encoder.global_attention.cpu(), 'global_attn_200.pt') # attention map 저장
-            ############################################################################
+            # elif epoch==200 and step==0:
+            #     with torch.no_grad():
+            #         enc_output, global_preference = model.encoder(batch)
+            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_200.pt') # attention map 저장
+            # ############################################################################
             # forward pass
             enc_output, global_preference = model.encoder(batch)
 
@@ -627,17 +627,11 @@ def main():
     model_config["num_item"] = data_making.num_item
     model_config["max_user_degree"] = data_making.max_user_degree
     model_config["max_item_degree"] = data_making.max_item_degree
-    # model expansion (1) : Increase # of Encoder/Decoder Blocks
     model_config["num_heads"] = args.num_heads
-    model_config["enc_blocks"] = args.enc_blocks
-    model_config["dec_blocks"] = args.dec_blocks
     model_config["d_model"] = args.d_model
     model_config["d_ffn"] = args.d_ffn
     model_config["dropout"] = args.dropout
-    
-    # model expansion (2) : MoE topk router
     model_config["n_experts"] = args.n_experts
-    # model expansion (2)-2 : MoE topk # of experts
     model_config["topk"] = args.topk
 
     ### log preparation ###
@@ -659,7 +653,6 @@ def main():
     print(model_config)
     model = Transformer(**model_config)
 
-    # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
     if not os.path.exists(checkpoint_data):
         os.makedirs(checkpoint_data)
@@ -675,12 +668,12 @@ def main():
     name_i_len = str(args.user_seq_len*args.item_per_user)
     name_augs = str(args.augs)
     name_n_heads = str(args.num_heads)
-    name_n_enc = str(args.enc_blocks)
-    name_n_dec = str(args.dec_blocks)
+    name_n_enc = str(model_config['enc_blocks'])
+    name_n_dec = str(model_config['dec_blocks'])
     name_d_model = str(model_config['d_model'])
     name_d_ffn = str(model_config['d_ffn'])
-    name_lr = str(args.lr)
-    name_lr_enc = str(args.lr_enc)
+    name_lr = str(training_config['lr'])
+    name_lr_enc = str(training_config['lr_enc'])
     name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_lr, args.dec_scheduler])
     enc_name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_lr_enc, args.enc_scheduler])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
@@ -723,7 +716,7 @@ def main():
     if not args.eval:
         optimizer = torch.optim.AdamW(
             model.encoder.parameters(),
-            lr = args.lr_enc,
+            lr = training_config['lr_enc'],
             betas=[0.9,0.999],
             weight_decay=training_config['weight_decay'])
 
@@ -759,14 +752,14 @@ def main():
         optimizer = torch.optim.AdamW(
             # model.decoder.parameters(),
             model.parameters(),
-            lr = args.lr,
+            lr = training_config['lr'],
             betas=[0.9,0.999],
             weight_decay=training_config['weight_decay'])
                     
         if args.dec_scheduler=='rp':
             # decoder 초기 LR 재설정
             for param_group in optimizer.param_groups:
-                param_group['lr'] = args.lr
+                param_group['lr'] = training_config['lr']
 
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer = optimizer,
@@ -801,6 +794,9 @@ def main():
         model.load_state_dict(checkpoint["model_state_dict"])
         print("loading the best model from: " + checkpoint_path)
         eval2(model, ds_iter)
+        # with torch.no_grad():
+        #     _ = model.encoder(batch)
+        #     torch.save(model.encoder.global_attention.cpu(), 'global_attn.pt') # attention map 저장
 
     torch.cuda.empty_cache()
 
