@@ -338,7 +338,7 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
             return result_list
         
         # rating split안에서만 item select하도록 변경 -> train/valid/test간에 완전 분리
-        def map_user_items(user_sequence):
+        def map_user_items(user_sequence, train_pairs):
             item_sequence = []
             for user in user_sequence:
                 items = interacted_items.get(user, [0])
@@ -427,3 +427,17 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         print(f"# of total {split} : {len(total_df)}")
     
     return total_df, used_pairs
+
+def get_used_pairs(total_df):
+    all_pairs = []
+    for users, items, ratings in zip(total_df['user_sequences'], total_df['item_sequences'], total_df['item_rating']):
+        users = np.array(users)
+        items = np.array(items)
+        
+        nz_u, nz_i = torch.nonzero(ratings, as_tuple=True)
+        pair_u = users[nz_u.numpy()]
+        pair_i = items[nz_i.numpy()]
+        
+        all_pairs.extend(zip(pair_u, pair_i))
+        
+    return all_pairs
