@@ -193,8 +193,8 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
             lr_scheduler.step()
             
         print(f"Epoch {epoch:03d} || Encoder Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} ||\n")
-        if update_cnt==30: 
-            break
+        # if update_cnt==30: 
+        #     break
 
 def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, best_mae, update_cnt):
     eval_losses = AverageMeter()
@@ -548,7 +548,7 @@ def get_args():
     parser.add_argument('--dropout', type=float, default=0.1, help="num dec layers")
     parser.add_argument('--n_experts', type=int, default=4, help="MoE number of total experts")
     parser.add_argument('--topk', type=int, default=3, help="MoE number of experts")
-    parser.add_argument('--lr_enc', type=float, default=8e-3)
+    parser.add_argument('--lr_enc', type=float, default=1e-2)
     parser.add_argument('--lr', type=float, default=5e-3) 
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
@@ -620,19 +620,25 @@ def main():
     ######################################################### model initialization #########################################################
     
     # model config - num users & num items & degrees
-    model_config["user_seq_len"] = args.user_seq_len
-    model_config["item_seq_len"] = args.user_seq_len*args.item_per_user
-    model_config['min_item_len'] = min_item_len
     model_config["num_user"] = data_making.num_user
     model_config["num_item"] = data_making.num_item
+    model_config['min_item_len'] = min_item_len
     model_config["max_user_degree"] = data_making.max_user_degree
     model_config["max_item_degree"] = data_making.max_item_degree
-    model_config["num_heads"] = args.num_heads
-    model_config["d_model"] = args.d_model
-    model_config["d_ffn"] = args.d_ffn
-    model_config["dropout"] = args.dropout
-    model_config["n_experts"] = args.n_experts
-    model_config["topk"] = args.topk
+    model_config['user_seq_len'] = args.user_seq_len if model_config['user_seq_len']!=args.user_seq_len else model_config['user_seq_len']
+    model_config['item_seq_len'] = args.user_seq_len*args.item_per_user if model_config['item_seq_len']!=args.user_seq_len*args.item_per_user else model_config['item_seq_len']
+    model_config['enc_blocks'] = args.enc_blocks if model_config['enc_blocks']!=args.enc_blocks else model_config['enc_blocks']
+    model_config['dec_blocks'] = args.dec_blocks if model_config['dec_blocks']!=args.dec_blocks else model_config['dec_blocks']
+    model_config['num_heads'] = args.num_heads if model_config['num_heads']!=args.num_heads else model_config['num_heads']
+    model_config['d_model'] = args.d_model if model_config['d_model']!=args.d_model else model_config['d_model']
+    model_config['d_ffn'] = args.d_ffn if model_config['d_ffn']!=args.d_ffn else model_config['d_ffn']
+    model_config['n_experts'] = args.n_experts if model_config['n_experts']!=args.n_experts else model_config['n_experts']
+    model_config['topk'] = args.topk if model_config['topk']!=args.topk else model_config['topk']
+    
+    
+    # training config
+    training_config['lr'] = args.lr if training_config['lr']!=args.lr else training_config['lr']
+    training_config['lr_enc'] = args.lr_enc if training_config['lr_enc']!=args.lr_enc else training_config['lr_enc']
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -664,18 +670,18 @@ def main():
         os.makedirs(checkpoint_dir)
     
     name_seed = str(args.seed)
-    name_u_len = str(args.user_seq_len)
-    name_i_len = str(args.user_seq_len*args.item_per_user)
     name_augs = str(args.augs)
-    name_n_heads = str(args.num_heads)
+    name_u_len = str(model_config['user_seq_len'])
+    name_i_len = str(model_config['item_seq_len'])
+    name_n_heads = str(model_config['num_heads'])
     name_n_enc = str(model_config['enc_blocks'])
     name_n_dec = str(model_config['dec_blocks'])
     name_d_model = str(model_config['d_model'])
     name_d_ffn = str(model_config['d_ffn'])
-    # name_lr = str(training_config['lr'])
-    name_lr = str(args.lr)
-    # name_lr_enc = str(training_config['lr_enc'])
-    name_lr_enc = str(args.lr_enc)
+    # name_lr = str(args.lr)
+    name_lr = str(training_config['lr'])
+    name_lr_enc = str(training_config['lr_enc'])
+    # name_lr_enc = str(args.lr_enc)
     name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_lr, args.dec_scheduler])
     enc_name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_lr_enc, args.enc_scheduler])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
@@ -730,18 +736,18 @@ def main():
             factor = 0.9,
             patience = 2,
             min_lr=1e-5,
-            threshold = 1e-3,
+            threshold = 1e-2,
             verbose = True
             )
         else:
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=10,
+            first_cycle_steps=20,
             cycle_mult=1,
-            max_lr = args.lr_enc,
-            min_lr=1e-5,
-            warmup_steps=2,
-            gamma=0.9,
+            max_lr = training_config['lr_enc'],
+            min_lr=1e-4,
+            warmup_steps=4,
+            gamma=0.8,
             )
         
         if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
@@ -752,10 +758,8 @@ def main():
         
         # Decoder 학습
         optimizer = torch.optim.AdamW(
-            # model.decoder.parameters(),
             model.parameters(),
-            # lr = training_config['lr'],
-            lr = args.lr,
+            lr = training_config['lr'],
             betas=[0.9,0.999],
             weight_decay=training_config['weight_decay'])
                     
@@ -778,7 +782,7 @@ def main():
             optimizer=optimizer,
             first_cycle_steps=100,
             cycle_mult=1,
-            max_lr = args.lr,
+            max_lr = training_config['lr'],
             min_lr=5e-5,
             warmup_steps=10,
             gamma=0.5,

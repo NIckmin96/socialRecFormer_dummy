@@ -408,13 +408,14 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_len))
         total_df = total_df.explode(['item_sequences','item_degree'])
         # rating matrix
-        total_df['item_rating'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray()), axis=1)
-        # total_df['item_rating'] = total_df.progress_apply(lambda x:get_ratings(x['user_sequences'], x['item_sequences']), axis=1)
+        # total_df['item_rating'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray()), axis=1)
+        total_df['item_rating'] = total_df.progress_apply(lambda x:get_ratings(x['user_sequences'], x['item_sequences']), axis=1)
         total_df['anchor_user'] = total_df['user_sequences'].progress_map(lambda x:x[0])
         total_df['anchor_degree'] = total_df['anchor_user'].progress_map(lambda x:user_degree_dic[x])
         total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else None)
         # train/valid/test 중 Minimum보다 큰 경우, random sample [tmp]
         total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:np.random.choice(x, min(len(x),min_item_len), replace=False).tolist())
+        print(total_df['anchor_items'].apply(len).max())
         
         # iteraction item 아무것도 없는 경우 drop
         total_df.dropna(subset='anchor_items', inplace=True)
@@ -424,11 +425,12 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
             total_df[['anchor_items','neg_samples']] = total_df[['anchor_user','anchor_items']].progress_apply(lambda x:add_negs(x['anchor_user'],x['anchor_items']), axis=1)
         total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
         # slice and pad
-        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
-        total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
-        # total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:pad_list(x,min_item_len*2))
-        # total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:pad_list(x,min_item_len*2))
-        total_df = total_df.explode(['anchor_items','anchor_item_degree'])
+        # total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
+        # total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
+        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:pad_list(x,min_item_len*2))
+        total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:pad_list(x,min_item_len*2))
+        print(total_df['anchor_items'].apply(len).max())
+        # total_df = total_df.explode(['anchor_items','anchor_item_degree'])
         # rating matrix
         total_df['anchor_ratings'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['anchor_user'],:][:,x['anchor_items']].toarray()), axis=1)        
         
