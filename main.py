@@ -186,17 +186,17 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
                         "Encoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(enc_iterator), sub_losses.avg))
             
             
-        valid_loss, best_rmse, best_mae, valid_rmse, update_cnt = valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, best_mae, update_cnt)
+        valid_loss, best_rmse, valid_rmse, update_cnt = valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt)
         if args.enc_scheduler=='rp':
             lr_scheduler.step(valid_rmse)
         else:
             lr_scheduler.step()
             
         print(f"Epoch {epoch:03d} || Encoder Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} ||\n")
-        # if update_cnt==30: 
-        #     break
+        if update_cnt==30: 
+            break
 
-def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, best_mae, update_cnt):
+def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt):
     eval_losses = AverageMeter()
     model.eval()
     
@@ -225,12 +225,12 @@ def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, best_mae, u
         best_rmse = total_rmse
         best_mae = total_mae
         torch.save({"model_state_dict":model.encoder.state_dict()}, checkpoint_path)
-        print(f'\t best model saved: epoch = {epoch}, test RMSE = {total_rmse:.6f}, test MAE = {total_mae:.6f}')
+        print(f'\t best model saved: epoch = {epoch}, test RMSE = {total_rmse:.6f}')
         update_cnt = 0
     else:
         update_cnt += 1
 
-    return eval_losses.avg, best_rmse, best_mae, total_rmse, update_cnt
+    return eval_losses.avg, best_rmse, total_rmse, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
@@ -301,8 +301,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                         "Decoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(dec_iterator), losses.avg))
             
         # total_time += (start.elapsed_time(end))
-        # valid_loss, best_rmse, best_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
-        valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        valid_loss, best_rmse, best_ndcg, valid_ndcg, valid_rmse, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_ndcg, update_cnt)
         if args.dec_scheduler=='rp':
             lr_scheduler.step(valid_rmse)
         else:
@@ -314,13 +313,10 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         # Tensorboard recording
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
-        writer.add_scalar('MAE/Test', valid_mae, epoch)
 
         # epoch_rank_loss = rank_losses.avg
 
         print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
-        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
-        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
         if update_cnt > 20: 
             break
     writer.close()
@@ -336,7 +332,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         pickle.dump(lr_lst, f)
         
 
-def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_mae, best_ndcg, update_cnt):
+def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_ndcg, update_cnt):
     eval_losses = AverageMeter()
     model.eval()
     
@@ -399,22 +395,25 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)
-            
-    if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
-    # if total_rmse < best_rmse: 
+    
+    rmse_score = -np.exp(-(best_rmse/total_rmse))+1
+    base_score = -np.exp(-1)+1
+    
+    if rmse_score+total_ndcg>base_score+best_ndcg:
+        print(f"RMSE Score : {rmse_score} / , NDCG DIFF : {total_ndcg-best_ndcg}")
+    # if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_mae = total_mae
         torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-        print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test MAE = {total_mae:.6f}, test NDCG@10 = {best_ndcg:.6f}')
+        print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test NDCG@10 = {best_ndcg:.6f}')
         update_cnt = 0
-    elif total_rmse <= best_rmse:
-        pass
+    # elif total_rmse < best_rmse:
+    #     pass
     else:
         update_cnt += 1
 
-    return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_ndcg, total_rmse, total_mae, update_cnt
-    # return eval_losses.avg, best_rmse, best_mae, total_rmse, total_mae, update_cnt
+    return eval_losses.avg, best_rmse, best_ndcg, total_ndcg, total_rmse, update_cnt
     
 def eval2(model, ds_iter):
     model.eval()
@@ -542,28 +541,28 @@ def get_args():
     parser.add_argument('--name', type=str, help="checkpoint model name")
     parser.add_argument('--d_model', type=int, default=128)
     parser.add_argument('--d_ffn', type=int, default=256)
-    parser.add_argument('--num_heads', type=int, default=2, help="num enc layers")
+    parser.add_argument('--num_heads', type=int, default=8, help="num enc layers")
     parser.add_argument('--enc_blocks', type=int, default=1, help="num enc layers")
     parser.add_argument('--dec_blocks', type=int, default=1, help="num dec layers")
-    parser.add_argument('--dropout', type=float, default=0.1, help="num dec layers")
-    parser.add_argument('--n_experts', type=int, default=4, help="MoE number of total experts")
-    parser.add_argument('--topk', type=int, default=3, help="MoE number of experts")
-    parser.add_argument('--lr_enc', type=float, default=1e-2)
+    parser.add_argument('--dropout', type=float, default=0.3, help="num dec layers")
+    parser.add_argument('--n_experts', type=int, default=2, help="MoE number of total experts")
+    parser.add_argument('--topk', type=int, default=1, help="MoE number of experts")
+    parser.add_argument('--lr_enc', type=float, default=5e-3)
     parser.add_argument('--lr', type=float, default=5e-3) 
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
-    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
+    parser.add_argument('--user_seq_len', type=int, default=50, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
-    parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
+    parser.add_argument('--bs', type=int, default=32, help="Batch size of dataloader")
     parser.add_argument('--neg', type=bool, default=False)
 
     # tuning
     # parser.add_argument('--scheduler', type=str, default='rp')
     parser.add_argument('--enc_scheduler', type=str, default='rp')
-    parser.add_argument('--dec_scheduler', type=str, default='cs')
+    parser.add_argument('--dec_scheduler', type=str, default='rp')
     
     args = parser.parse_args()
     return args
@@ -611,10 +610,10 @@ def main():
     test_ds = DecoderDataset(total_test)
     
     ds_iter = {
-            "train_enc":DataLoader(train_enc, batch_size = training_config["batch_size"], shuffle=True, num_workers=1),
-            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=1),
-            "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1),
-            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1)
+            "train_enc":DataLoader(train_enc, batch_size = training_config["batch_size"]*args.augs, shuffle=True, num_workers=2),
+            "train":DataLoader(train_ds, batch_size = training_config["batch_size"]*args.augs, shuffle=True, num_workers=2),
+            "valid":DataLoader(valid_ds, batch_size = 1024, shuffle=False, num_workers=1),
+            "test":DataLoader(test_ds, batch_size = 1024, shuffle=False, num_workers=1)
     }
     
     ######################################################### model initialization #########################################################
@@ -632,6 +631,7 @@ def main():
     model_config['num_heads'] = args.num_heads if model_config['num_heads']!=args.num_heads else model_config['num_heads']
     model_config['d_model'] = args.d_model if model_config['d_model']!=args.d_model else model_config['d_model']
     model_config['d_ffn'] = args.d_ffn if model_config['d_ffn']!=args.d_ffn else model_config['d_ffn']
+    model_config['dropout'] = args.dropout if model_config['dropout']!=args.dropout else model_config['dropout']
     model_config['n_experts'] = args.n_experts if model_config['n_experts']!=args.n_experts else model_config['n_experts']
     model_config['topk'] = args.topk if model_config['topk']!=args.topk else model_config['topk']
     
@@ -671,6 +671,7 @@ def main():
     
     name_seed = str(args.seed)
     name_augs = str(args.augs)
+    name_bs = str(args.bs)
     name_u_len = str(model_config['user_seq_len'])
     name_i_len = str(model_config['item_seq_len'])
     name_n_heads = str(model_config['num_heads'])
@@ -678,12 +679,15 @@ def main():
     name_n_dec = str(model_config['dec_blocks'])
     name_d_model = str(model_config['d_model'])
     name_d_ffn = str(model_config['d_ffn'])
+    name_experts = str(model_config['n_experts'])
+    name_topk = str(model_config['topk'])
+    name_dropout = str(args.dropout)
     # name_lr = str(args.lr)
     name_lr = str(training_config['lr'])
     name_lr_enc = str(training_config['lr_enc'])
     # name_lr_enc = str(args.lr_enc)
-    name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_lr, args.dec_scheduler])
-    enc_name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_lr_enc, args.enc_scheduler])
+    name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler])
+    enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
     checkpoint_enc = os.path.join(checkpoint_dir, f'{enc_name}_enc.model') # set model name
     print(checkpoint_path, "\n")
@@ -734,27 +738,28 @@ def main():
             optimizer = optimizer,
             mode = 'min',
             factor = 0.9,
-            patience = 2,
+            patience = 3,
             min_lr=1e-5,
-            threshold = 1e-2,
+            threshold = 1e-3,
             verbose = True
             )
         else:
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=20,
-            cycle_mult=1,
+            first_cycle_steps=10,
+            cycle_mult=2,
             max_lr = training_config['lr_enc'],
             min_lr=1e-4,
-            warmup_steps=4,
+            warmup_steps=5,
             gamma=0.8,
             )
         
         if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
-            print("Best Encoder model loaded!")
             train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config)
-        checkpoint = torch.load(training_config['enc_checkpoint_path'])
-        model.encoder.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            print("Best Encoder model loaded!")
+            checkpoint = torch.load(training_config['enc_checkpoint_path'])
+            model.encoder.load_state_dict(checkpoint['model_state_dict'])
         
         # Decoder 학습
         optimizer = torch.optim.AdamW(
@@ -778,14 +783,23 @@ def main():
             verbose = True
             )
         else:
+            # lr_scheduler = CosineAnnealingWarmupRestarts(
+            # optimizer=optimizer,
+            # first_cycle_steps=100,
+            # cycle_mult=1,
+            # max_lr = training_config['lr'],
+            # min_lr=5e-5,
+            # warmup_steps=10,
+            # gamma=0.5,
+            # )
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=100,
-            cycle_mult=1,
+            first_cycle_steps=10,
+            cycle_mult=2,
             max_lr = training_config['lr'],
-            min_lr=5e-5,
-            warmup_steps=10,
-            gamma=0.5,
+            min_lr=1e-4,
+            warmup_steps=5,
+            gamma=0.8,
             )
         
         train(model, optimizer, lr_scheduler, ds_iter, training_config, writer)
