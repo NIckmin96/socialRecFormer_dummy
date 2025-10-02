@@ -811,13 +811,17 @@ def main():
     ### eval ###
     print(checkpoint_path)
     if os.path.exists(checkpoint_path): #and checkpoint_path != os.getcwd() + '/checkpoints/test.model':
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print("loading the best model from: " + checkpoint_path)
-        eval2(model, ds_iter)
-        # with torch.no_grad():
-        #     _ = model.encoder(batch)
-        #     torch.save(model.encoder.global_attention.cpu(), 'global_attn.pt') # attention map 저장
+        with torch.no_grad():
+            batch = next(iter(ds_iter['train']))
+            batch = {k:v.to(device) for k,v in batch.items()}
+            _ = model(batch)
+            torch.save(model.encoder.global_attention.cpu(), 'soft_attn_b4.pt') # attention map 저장
+            checkpoint = torch.load(checkpoint_path)
+            model.load_state_dict(checkpoint["model_state_dict"])
+            print("loading the best model from: " + checkpoint_path)
+            _ = model(batch)
+            torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
+            eval2(model, ds_iter)
 
     torch.cuda.empty_cache()
 

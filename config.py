@@ -1,16 +1,16 @@
 ciao_timestamp={  
          # dataset의 전체 길이 (기록 및 확인용) (train:val:test = 8:1:1)
          "model":{
-            "num_heads":8,
             "enc_blocks":1,
             "dec_blocks":1,
+            "num_heads":4,
+            "n_experts":4,
+            "topk":1,
             "user_seq_len":50,
             "item_seq_len":250,
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
-            "n_experts":2,
-            "topk":1
          },
          "training":{
             "weight_decay":1e-2,
@@ -22,10 +22,16 @@ ciao_timestamp={
 
 epinions={
          "model":{
-            "num_heads":2,
+            "num_heads":8,
             "enc_blocks":1,
             "dec_blocks":1,
-            "dropout": 0.3,         
+            "user_seq_len":50,
+            "item_seq_len":250,
+            "d_model":128,
+            "d_ffn":256,
+            "dropout": 0.3,
+            "n_experts":2,
+            "topk":1
          },
          "training":{
             "weight_decay":1e-2,
