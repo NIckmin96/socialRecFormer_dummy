@@ -1,5 +1,5 @@
 import os
-import sys
+import gc
 import logging
 import argparse
 import random
@@ -120,6 +120,14 @@ def BPR(output_batch, rating_batch, neg):
     return bpr_loss
 
 def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
+    # ######################### 학습 전, attention map 저장 #########################
+    tmp_batch = next(iter(ds_iter['train']))
+    tmp_batch = {k:v.to(device) for k,v in tmp_batch.items()}
+    model.eval()
+    with torch.no_grad():
+        enc_output, global_preference = model.encoder(tmp_batch)
+        torch.save(model.encoder.global_attention.cpu(), 'soft_attn_b4.pt') # attention map 저장
+    # ############################################################################
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
     logger.info("***** Running Encoder training *****")
@@ -137,9 +145,7 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
     metrics = Metrics()
     # Training step
     for epoch in range(total_epochs):
-    # for epoch in range(total_epochs):
         sub_losses = AverageMeter()
-        
         # encoder 학습
         enc_iterator = tqdm(ds_iter['train_enc'], desc="Encoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(enc_iterator):
@@ -152,24 +158,24 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
             sub_losses.update(sub_loss.item())
             
             nn.utils.clip_grad_value_(model.encoder.parameters(), clip_value=1) # Gradient Clipping
+            optimizer.zero_grad()            
             sub_loss.backward()
             optimizer.step()
-            optimizer.zero_grad()            
             enc_iterator.set_description(
                         "Encoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(enc_iterator), sub_losses.avg))
             
             
-        valid_loss, best_rmse, best_mae, valid_rmse, update_cnt = valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, best_mae, update_cnt)
+        valid_loss, best_rmse, valid_rmse, update_cnt = valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt)
         if args.enc_scheduler=='rp':
             lr_scheduler.step(valid_rmse)
         else:
             lr_scheduler.step()
             
-        print(f"Epoch {epoch:03d} || Sub Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
+        print(f"Epoch {epoch:03d} || Encoder Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} ||\n")
         if update_cnt==30: 
             break
 
-def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, best_mae, update_cnt):
+def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt):
     eval_losses = AverageMeter()
     model.eval()
     
@@ -198,12 +204,12 @@ def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, best_mae, u
         best_rmse = total_rmse
         best_mae = total_mae
         torch.save({"model_state_dict":model.encoder.state_dict()}, checkpoint_path)
-        print(f'\t best model saved: epoch = {epoch}, test RMSE = {total_rmse:.6f}, test MAE = {total_mae:.6f}')
+        print(f'\t best model saved: epoch = {epoch}, test RMSE = {total_rmse:.6f}')
         update_cnt = 0
     else:
         update_cnt += 1
 
-    return eval_losses.avg, best_rmse, best_mae, total_rmse, update_cnt
+    return eval_losses.avg, best_rmse, total_rmse, update_cnt
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
@@ -222,25 +228,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     init_t = time.time()
     total_time = 0
     update_cnt = 0
-    
-    # if device.type=='cuda':
-    #     start = torch.cuda.Event(enable_timing=True)
-    #     end = torch.cuda.Event(enable_timing=True)
-    #     stream = torch.cuda.current_stream(device=device)
-    #     start.record(stream)
-
-    
-        # validation
-        # if device.type=='cuda':
-        #     end.record(stream)
-        #     torch.cuda.synchronize()
         
     lr_lst = []
     metrics = Metrics()
     for epoch in range(total_epochs):
         losses = AverageMeter()
         main_losses = AverageMeter()
-        sub_losses = AverageMeter()
         rank_losses = AverageMeter()
         # decoder 학습
         dec_iterator = tqdm(ds_iter['train'], desc="Decoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
@@ -253,11 +246,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             main_loss = metrics.RMSE(output, batch['anchor_ratings'], main_mask)
             main_losses.update(main_loss.item())
 
-            rank_mask = (batch['anchor_items'] != 0)
             rank_logit = F.log_softmax(output, dim=-1).float()
             rank_target = F.softmax(batch['anchor_ratings'], dim=-1)
             rank_loss = F.kl_div(rank_logit, rank_target, reduction='batchmean')
-            # rank_loss = metrics.BPR(output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_losses.update(rank_loss.item())
             
     
@@ -267,15 +258,14 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             
             
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
+            optimizer.zero_grad()            
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()            
             dec_iterator.set_description(
                         "Decoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(dec_iterator), losses.avg))
             
         # total_time += (start.elapsed_time(end))
-        # valid_loss, best_rmse, best_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
-        valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        valid_loss, best_rmse, best_ndcg, valid_ndcg, valid_rmse, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_ndcg, update_cnt)
         if args.dec_scheduler=='rp':
             lr_scheduler.step(valid_rmse)
         else:
@@ -287,13 +277,10 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         # Tensorboard recording
         writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
         writer.add_scalar('RMSE/Test', valid_rmse, epoch)
-        writer.add_scalar('MAE/Test', valid_mae, epoch)
 
         # epoch_rank_loss = rank_losses.avg
 
-        print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Sub Loss: {sub_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
-        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
-        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
+        print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
         if update_cnt > 20: 
             break
     writer.close()
@@ -309,13 +296,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         pickle.dump(lr_lst, f)
         
 
-def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_mae, best_ndcg, update_cnt):
+def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_ndcg, update_cnt):
     eval_losses = AverageMeter()
-    model.eval()
-    
     metrics = Metrics()
-    total_rmse, total_mae = 0.0, 0.0
     output_df = pd.DataFrame()
+    total_rmse, total_mae = 0.0, 0.0
+    model.eval()
     with torch.no_grad():
         
         dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
@@ -372,24 +358,35 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_m
     total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)
-            
-    if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
-    # if total_rmse < best_rmse: 
+    
+    rmse_score = (-np.exp(-(best_rmse/total_rmse))+1)
+    base_score = (-np.exp(-1)+1)
+    
+     # 상대 개선 비율 계산
+    ndcg_ratio = total_ndcg / best_ndcg if best_ndcg > 0 else 1.0
+    rmse_ratio = best_rmse / rmse if rmse > 0 else 1.0
+
+    # 조건 비교 (score 없이)
+    improved = (0.5 * ndcg_ratio + 0.5 * rmse_ratio) > 1.0
+    
+    # if (rmse_score-base_score)*1.2+(total_ndcg-best_ndcg)>0:
+    if improved:
+        print(f"RMSE Score : {rmse_score} / , NDCG DIFF : {total_ndcg-best_ndcg}")
+    # if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_mae = total_mae
         torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-        print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test MAE = {total_mae:.6f}, test NDCG@10 = {best_ndcg:.6f}')
+        print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test NDCG@10 = {best_ndcg:.6f}')
         update_cnt = 0
-    # elif (total_rmse-best_rmse)<=0.01:
+    # elif total_rmse < best_rmse:
     #     pass
     else:
         update_cnt += 1
 
-    return eval_losses.avg, best_rmse, best_mae, best_ndcg, total_ndcg, total_rmse, total_mae, update_cnt
-    # return eval_losses.avg, best_rmse, best_mae, total_rmse, total_mae, update_cnt
+    return eval_losses.avg, best_rmse, best_ndcg, total_ndcg, total_rmse, update_cnt
     
-def eval2(model, ds_iter):
+def eval(model, ds_iter):
     model.eval()
     metrics = Metrics()
     # if device.type=='cuda':
@@ -513,16 +510,6 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--d_model', type=int, default=128)
-    parser.add_argument('--d_ffn', type=int, default=256)
-    parser.add_argument('--num_heads', type=int, default=2, help="num enc layers")
-    parser.add_argument('--enc_blocks', type=int, default=1, help="num enc layers")
-    parser.add_argument('--dec_blocks', type=int, default=1, help="num dec layers")
-    parser.add_argument('--dropout', type=float, default=0.1, help="num dec layers")
-    parser.add_argument('--n_experts', type=int, default=4, help="MoE number of total experts")
-    parser.add_argument('--topk', type=int, default=3, help="MoE number of experts")
-    parser.add_argument('--lr_enc', type=float, default=8e-3)
-    parser.add_argument('--lr', type=float, default=5e-3) 
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
@@ -530,13 +517,13 @@ def get_args():
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
-    parser.add_argument('--bs', type=int, default=128, help="Batch size of dataloader")
+    parser.add_argument('--bs', type=int, default=32, help="Batch size of dataloader")
     parser.add_argument('--neg', type=bool, default=False)
 
     # tuning
     # parser.add_argument('--scheduler', type=str, default='rp')
     parser.add_argument('--enc_scheduler', type=str, default='rp')
-    parser.add_argument('--dec_scheduler', type=str, default='cs')
+    parser.add_argument('--dec_scheduler', type=str, default='rp')
     
     args = parser.parse_args()
     return args
@@ -575,7 +562,11 @@ def main():
     model_config = Config[args.dataset]["model"]
     training_config = Config[args.dataset]["training"]
     # batch size update
-    training_config["batch_size"] = args.bs
+    # training_config["batch_size"] = args.bs
+    if args.dataset=='ciao_timestamp':
+        test_bs = 1024
+    else:
+        test_bs = 128
     
     # dataset & dataloader
     train_enc = EncoderDataset(total_train)
@@ -584,34 +575,22 @@ def main():
     test_ds = DecoderDataset(total_test)
     
     ds_iter = {
-            "train_enc":DataLoader(train_enc, batch_size = training_config["batch_size"], shuffle=True, num_workers=1),
-            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=1),
-            "valid":DataLoader(valid_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1),
-            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=1)
+            "train_enc":DataLoader(train_enc, batch_size = training_config['batch_size']*args.augs, shuffle=True, num_workers=4),
+            "train":DataLoader(train_ds, batch_size = training_config['batch_size'], shuffle=True, num_workers=4),
+            "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
+            "test":DataLoader(test_ds, batch_size = test_bs, shuffle=False, num_workers=1)
     }
     
     ######################################################### model initialization #########################################################
     
     # model config - num users & num items & degrees
-    model_config["user_seq_len"] = args.user_seq_len
-    model_config["item_seq_len"] = args.user_seq_len*args.item_per_user
-    model_config['min_item_len'] = min_item_len
     model_config["num_user"] = data_making.num_user
     model_config["num_item"] = data_making.num_item
+    model_config['min_item_len'] = min_item_len
+    model_config['user_seq_len'] = args.user_seq_len
+    model_config['item_seq_len'] = args.user_seq_len*args.item_per_user
     model_config["max_user_degree"] = data_making.max_user_degree
     model_config["max_item_degree"] = data_making.max_item_degree
-    # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    model_config["num_heads"] = args.num_heads
-    model_config["enc_blocks"] = args.enc_blocks
-    model_config["dec_blocks"] = args.dec_blocks
-    model_config["d_model"] = args.d_model
-    model_config["d_ffn"] = args.d_ffn
-    model_config["dropout"] = args.dropout
-    
-    # model expansion (2) : MoE topk router
-    model_config["n_experts"] = args.n_experts
-    # model expansion (2)-2 : MoE topk # of experts
-    model_config["topk"] = args.topk
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -632,7 +611,6 @@ def main():
     print(model_config)
     model = Transformer(**model_config)
 
-    # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
     if not os.path.exists(checkpoint_data):
         os.makedirs(checkpoint_data)
@@ -644,18 +622,22 @@ def main():
         os.makedirs(checkpoint_dir)
     
     name_seed = str(args.seed)
-    name_u_len = str(args.user_seq_len)
-    name_i_len = str(args.user_seq_len*args.item_per_user)
     name_augs = str(args.augs)
-    name_n_heads = str(args.num_heads)
-    name_n_enc = str(args.enc_blocks)
-    name_n_dec = str(args.dec_blocks)
+    name_bs = str(training_config['batch_size'])
+    name_u_len = str(model_config['user_seq_len'])
+    name_i_len = str(model_config['item_seq_len'])
+    name_n_heads = str(model_config['num_heads'])
+    name_n_enc = str(model_config['enc_blocks'])
+    name_n_dec = str(model_config['dec_blocks'])
     name_d_model = str(model_config['d_model'])
     name_d_ffn = str(model_config['d_ffn'])
-    name_lr = str(args.lr)
-    name_lr_enc = str(args.lr_enc)
-    name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_lr, args.dec_scheduler])
-    enc_name = '_'.join([name_seed, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_lr_enc, args.enc_scheduler])
+    name_experts = str(model_config['n_experts'])
+    name_topk = str(model_config['topk'])
+    name_dropout = str(model_config['dropout'])
+    name_lr = str(training_config['lr'])
+    name_lr_enc = str(training_config['lr_enc'])
+    name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler])
+    enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
     checkpoint_enc = os.path.join(checkpoint_dir, f'{enc_name}_enc.model') # set model name
     print(checkpoint_path, "\n")
@@ -696,9 +678,9 @@ def main():
     if not args.eval:
         optimizer = torch.optim.AdamW(
             model.encoder.parameters(),
-            lr = args.lr_enc,
+            lr = training_config['lr_enc'],
             betas=[0.9,0.999],
-            weight_decay=training_config['weight_decay'])
+            weight_decay=training_config['weight_decay_enc'])
 
         # Encoder 학습 정의
         if args.enc_scheduler=='rp':
@@ -707,7 +689,7 @@ def main():
             mode = 'min',
             factor = 0.9,
             patience = 2,
-            min_lr=1e-5,
+            min_lr=5e-5,
             threshold = 1e-3,
             verbose = True
             )
@@ -716,49 +698,62 @@ def main():
             optimizer=optimizer,
             first_cycle_steps=10,
             cycle_mult=1,
-            max_lr = args.lr_enc,
-            min_lr=1e-5,
-            warmup_steps=2,
+            max_lr = training_config['lr_enc'],
+            min_lr=1e-4,
+            warmup_steps=3,
             gamma=0.9,
             )
         
         if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
-            print("Best Encoder model loaded!")
             train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config)
-        checkpoint = torch.load(training_config['enc_checkpoint_path'])
-        model.encoder.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            print("Best Encoder model loaded!")
+            checkpoint = torch.load(training_config['enc_checkpoint_path'])
+            model.encoder.load_state_dict(checkpoint['model_state_dict'])
+            
+        del optimizer
+        gc.collect()
+        torch.cuda.empty_cache()
         
         # Decoder 학습
         optimizer = torch.optim.AdamW(
-            # model.decoder.parameters(),
             model.parameters(),
-            lr = args.lr,
+            lr = training_config['lr'],
             betas=[0.9,0.999],
-            weight_decay=training_config['weight_decay'])
+            weight_decay=training_config['weight_decay_dec'])
                     
         if args.dec_scheduler=='rp':
             # decoder 초기 LR 재설정
             for param_group in optimizer.param_groups:
-                param_group['lr'] = args.lr
+                param_group['lr'] = training_config['lr']
 
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer = optimizer,
             mode = 'min',
             factor = 0.9,
             patience = 2,
-            min_lr=1e-5,
+            min_lr=5e-5,
             threshold = 1e-3,
             verbose = True
             )
         else:
+            # lr_scheduler = CosineAnnealingWarmupRestarts(
+            # optimizer=optimizer,
+            # first_cycle_steps=100,
+            # cycle_mult=1,
+            # max_lr = training_config['lr'],
+            # min_lr=5e-5,
+            # warmup_steps=10,
+            # gamma=0.5,
+            # )
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
             first_cycle_steps=100,
-            cycle_mult=1,
-            max_lr = args.lr,
-            min_lr=5e-5,
-            warmup_steps=10,
-            gamma=0.5,
+            cycle_mult=2,
+            max_lr = training_config['lr'],
+            min_lr=1e-4,
+            warmup_steps=5,
+            gamma=0.8,
             )
         
         train(model, optimizer, lr_scheduler, ds_iter, training_config, writer)
@@ -770,10 +765,16 @@ def main():
     ### eval ###
     print(checkpoint_path)
     if os.path.exists(checkpoint_path): #and checkpoint_path != os.getcwd() + '/checkpoints/test.model':
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print("loading the best model from: " + checkpoint_path)
-        eval2(model, ds_iter)
+        model.eval()
+        with torch.no_grad():
+            batch = next(iter(ds_iter['train']))
+            batch = {k:v.to(device) for k,v in batch.items()}
+            checkpoint = torch.load(checkpoint_path)
+            model.load_state_dict(checkpoint["model_state_dict"])
+            print("loading the best model from: " + checkpoint_path)
+            eval(model, ds_iter)
+            _ = model(batch)
+            torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
 
     torch.cuda.empty_cache()
 

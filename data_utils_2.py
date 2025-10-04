@@ -124,9 +124,9 @@ def shuffle_and_split_dataset(data_path:str, df_len, test, seed, regen):
     valid_len = int(df_len*test)//2
     test_len = valid_len
     
-    train_path = os.path.join(data_path, f'rating_train_seed_{seed}_{train_len}.csv')
-    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}_{valid_len}.csv')
-    test_path = os.path.join(data_path, f'rating_test_seed_{seed}_{test_len}.csv')
+    train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
+    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
     # if (os.path.isfile(train_path)&os.path.isfile(valid_path)&os.path.isfile(test_path)&(not regen)):
     if os.path.isfile(train_path) & os.path.isfile(test_path) & (regen != 'all'):
@@ -150,9 +150,9 @@ def shuffle_and_split_dataset(data_path:str, df_len, test, seed, regen):
         rating_valid_set = split_rating_df.iloc[num_test//2:num_test]
         rating_train_set = split_rating_df.iloc[num_test:]
 
-        rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}_{test_len}.csv', index=False)
-        rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}_{valid_len}.csv', index=False)
-        rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}_{train_len}.csv', index=False)
+        rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
+        rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
+        rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
     
     print(f"data split finished, seed: {seed}\n")
     
@@ -321,6 +321,7 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         if split=='train':
             used_pairs = {user:set() for user in rating_split.user_id.unique()}
 
+        rating_lookup = {(row.user_id,row.product_id):row.rating for row in rating_split.itertuples(index=False)}
         interacted_items = rating_split.groupby('user_id')['product_id'].unique().to_dict()
         filtered_items = {user:list(set(items)-used_pairs.get(user,set())) for user,items in interacted_items.items()}
         
@@ -337,6 +338,12 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
 
             return result_list
         
+        def pad_list(input_list, pad_length):
+            pad = [0]*(pad_length-min(len(input_list), pad_length))
+            result_list = input_list + pad
+            
+            return result_list
+        
         # rating split안에서만 item select하도록 변경 -> train/valid/test간에 완전 분리
         def map_user_items(user_sequence):
             item_sequence = []
@@ -348,27 +355,54 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
                     selected = [0]
                 else:
                     selected  = list(items)
-                n = min(5, item_per_user-len(selected))
+                n = min(item_per_user, item_per_user-len(selected))
                 selected.extend([0]*n)
                 item_sequence.extend(selected)
             
             return item_sequence
         
-        def add_negs(user_id, anchor_items):
-            all_items = rating_split.product_id.unique().tolist()
-            anchor_items = list(set(anchor_items)-set([0])) # 0(interaction item이 아무것도 없는 경우 넣은 값) 제거
-            nnz = rating_matrix[user_id].indices
-            zero_indices = np.setdiff1d(all_items, nnz)
-            n = len(anchor_items)
-            n_samples = max(10-n, n)
-            neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))                
-            anchor_items.extend(neg_samples)
+        def get_ratings(user_seq, item_seq):
+            total_ratings = []
+            for user in user_seq:
+                ratings = []
+                for item in item_seq:
+                    rating = rating_lookup.get((user,item),0)
+                    ratings.append(rating)
+                total_ratings.append(ratings)
+            total_ratings = torch.FloatTensor(np.stack(total_ratings))
             
-            np.random.seed(seed)
-            np.random.shuffle(anchor_items)
-            
-            assert len(anchor_items)>=10
+            return total_ratings
         
+        def add_negs(user_id, anchor_items):
+            all_items = list(range(1,rating_matrix.shape[1])) # 전체 item
+            anchor_items = list(set(anchor_items)-set([0])) # 0(interaction item이 아무것도 없는 경우 넣은 값) 제거
+            nnz = rating_matrix[user_id].indices # user에 대해서 Nonzero인 item list
+            zero_indices = np.setdiff1d(all_items, nnz) # zero인 item index list
+            n = len(anchor_items) # positive item의 개수
+            n_samples = max(10-n, n) # negative item의 개수 = @k의 수보다 많아야함
+            ########################### [dev] ###########################
+            if n+n_samples>item_seq_len:
+                if n==n_samples:
+                    anchor_items = list(np.random.choice(anchor_items, size=item_seq_len//2, replace=False))
+                    neg_samples = list(np.random.choice(zero_indices, size=item_seq_len//2, replace=False))
+                else:
+                    neg_samples = list(np.random.choice(zero_indices, size=n+n_samples-item_seq_len, replace=False))
+            else:
+                neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))
+                
+            anchor_items.extend(neg_samples)
+            assert len(anchor_items)<=item_seq_len
+            ########################### [dev] ###########################
+            
+            ########################### [ORG] ###########################
+            # neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))                
+            # anchor_items.extend(neg_samples)
+            
+            # np.random.seed(seed)
+            # np.random.shuffle(anchor_items)
+            
+            # assert len(anchor_items)>=10
+            ########################### [ORG] ###########################
             return pd.Series({'anchor_items':list(anchor_items),
                               'neg_samples':list(neg_samples)})
                     
@@ -389,13 +423,16 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         total_df['item_degree'] = total_df['item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_len))
         total_df = total_df.explode(['item_sequences','item_degree'])
         # rating matrix
-        total_df['item_rating'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray()), axis=1)
-        
+        # total_df['item_rating'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray()), axis=1)
+        total_df['item_rating'] = total_df.progress_apply(lambda x:get_ratings(x['user_sequences'], x['item_sequences']), axis=1)
         total_df['anchor_user'] = total_df['user_sequences'].progress_map(lambda x:x[0])
         total_df['anchor_degree'] = total_df['anchor_user'].progress_map(lambda x:user_degree_dic[x])
-        total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else None)
+        # total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else None)
+        total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:interacted_items[x])
+        print("1. anchor item len :", total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
         # train/valid/test 중 Minimum보다 큰 경우, random sample [tmp]
         total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:np.random.choice(x, min(len(x),min_item_len), replace=False).tolist())
+        print("2. anchor item len :",total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
         
         # iteraction item 아무것도 없는 경우 drop
         total_df.dropna(subset='anchor_items', inplace=True)
@@ -403,14 +440,17 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         if neg:
             print("Negative Sampling...")
             total_df[['anchor_items','neg_samples']] = total_df[['anchor_user','anchor_items']].progress_apply(lambda x:add_negs(x['anchor_user'],x['anchor_items']), axis=1)
+        print("3. anchor item len :",total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
         total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
         # slice and pad
-        # item_len = total_df['anchor_items'].apply(len).max()
-        # total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,max_item_len))
-        # total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,max_item_len))
-        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
-        total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
-        total_df = total_df.explode(['anchor_items','anchor_item_degree'])
+        # total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,item_len))
+        # total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,item_len))
+        # total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
+        # total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:slice_and_pad_list(x,min_item_len))
+        total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:pad_list(x[:item_seq_len], item_seq_len))
+        total_df['anchor_item_degree'] = total_df['anchor_item_degree'].progress_map(lambda x:pad_list(x[:item_seq_len], item_seq_len))
+        print("4. anchor item len :",total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
+        # total_df = total_df.explode(['anchor_items','anchor_item_degree'])
         # rating matrix
         total_df['anchor_ratings'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['anchor_user'],:][:,x['anchor_items']].toarray()), axis=1)        
         
@@ -427,3 +467,17 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         print(f"# of total {split} : {len(total_df)}")
     
     return total_df, used_pairs
+
+def get_used_pairs(total_df):
+    all_pairs = []
+    for users, items, ratings in zip(total_df['user_sequences'], total_df['item_sequences'], total_df['item_rating']):
+        users = np.array(users)
+        items = np.array(items)
+        
+        nz_u, nz_i = torch.nonzero(ratings, as_tuple=True)
+        pair_u = users[nz_u.numpy()]
+        pair_i = items[nz_i.numpy()]
+        
+        all_pairs.extend(zip(pair_u, pair_i))
+        
+    return all_pairs
