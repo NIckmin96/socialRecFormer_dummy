@@ -11,21 +11,26 @@ class EncoderLayer(nn.Module):
     def __init__(self, user_seq_len, item_seq_len, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1):
         super(EncoderLayer, self).__init__()
 
-        self.self_norm = nn.BatchNorm1d(user_seq_len)
+        # self.self_norm = nn.BatchNorm1d(user_seq_len)
+        self.self_norm = nn.LayerNorm(d_model)
         self.self_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.self_dropout = nn.Dropout(p=dropout)
 
-        self.norm_moe1 = nn.BatchNorm1d(user_seq_len)
+        # self.norm_moe1 = nn.BatchNorm1d(user_seq_len)
+        self.norm_moe1 = nn.LayerNorm(d_model)
         self.moe1 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.ffn1 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.dropout_moe1 = nn.Dropout(p=dropout)
         
-        self.prefer_norm = nn.BatchNorm1d(user_seq_len)
-        self.prefer_norm_item = nn.BatchNorm1d(item_seq_len)
+        # self.prefer_norm = nn.BatchNorm1d(user_seq_len)
+        self.prefer_norm = nn.LayerNorm(d_model)
+        # self.prefer_norm_item = nn.BatchNorm1d(item_seq_len)
+        self.prefer_norm_item = nn.LayerNorm(d_model)
         self.prefer_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.prefer_dropout = nn.Dropout(p=dropout)
 
-        self.norm_moe2 = nn.BatchNorm1d(user_seq_len)
+        # self.norm_moe2 = nn.BatchNorm1d(user_seq_len)
+        self.norm_moe2 = nn.LayerNorm(d_model)
         self.moe2 = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.ffn2 = FeedForwardNetwork(d_model, d_ffn, dropout)
         self.dropout_moe2 = nn.Dropout(p=dropout)
@@ -49,8 +54,8 @@ class EncoderLayer(nn.Module):
         
         # 2-1. MoE/FFN
         residual = x
-        x = self.norm_moe2(x)
-        # x = self.ffn2(x)
+        # x = self.norm_moe2(x)
+        x = self.ffn2(x)
         x = self.moe2(x)
         # Add & Norm
         x = self.dropout_moe2(x)

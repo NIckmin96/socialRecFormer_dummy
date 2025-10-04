@@ -1,66 +1,88 @@
 ciao_timestamp={  
-         # dataset의 전체 길이 (기록 및 확인용) (train:val:test = 8:1:1)
          "model":{
-            "enc_blocks":1,
-            "dec_blocks":1,
-            "num_heads":4,
-            "n_experts":4,
+            "enc_blocks":2,
+            "dec_blocks":2,
+            "num_heads":8,
+            "n_experts":2,
             "topk":1,
-            "user_seq_len":50,
-            "item_seq_len":250,
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
          },
          "training":{
-            "weight_decay":1e-2,
-            "num_epochs":300,
+            "weight_decay_enc":1e-1,
+            "weight_decay_dec":1e-3,
+            "lr_enc":1e-2,
             "lr":5e-3,
-            "lr_enc":5e-3
+            "num_epochs":300,
+            "batch_size":64
          },
      }
 
 epinions={
          "model":{
-            "num_heads":8,
-            "enc_blocks":1,
-            "dec_blocks":1,
-            "user_seq_len":50,
-            "item_seq_len":250,
+            "enc_blocks":2,
+            "dec_blocks":2,
+            "num_heads":4,
+            "n_experts":4,
+            "topk":2,
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
-            "n_experts":2,
-            "topk":1
          },
          "training":{
-            "weight_decay":1e-2,
-            "num_epochs":300,
+            "weight_decay_enc":1e-1,
+            "weight_decay_dec":1e-3,
+            "lr_enc":1e-2,
             "lr":5e-3,
-            "lr_enc":5e-3
+            "num_epochs":300,
+            "batch_size":128
          },
      }
 
 yelp={
          "model":{
-            "num_heads": 2,
-            "dropout": 0.3,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "enc_blocks":1,
+            "dec_blocks":1,
+            "num_heads":8,
+            "n_experts":2,
+            "topk":2,
+            "user_seq_len":30,
+            "item_seq_len":150,
+            "d_model":128,
+            "d_ffn":256,
+            "dropout": 0.3,
          },
          "training":{
-            "weight_decay":1e-2,
+            "weight_decay_enc":5e-2,
+            "weight_decay_dec":1e-2,
             "num_epochs":300,
+            "lr":5e-3,
+            "lr_enc":5e-3,
+            "batch_size":128
          },
      }
 
 Douban={
          "model":{
-            "num_heads": 2,
-            "dropout": 0.3,         # Inside FFN, decoder_layer & encoder_layer (applied after linear & attention)
+            "enc_blocks":1,
+            "dec_blocks":1,
+            "num_heads":8,
+            "n_experts":2,
+            "topk":2,
+            "user_seq_len":30,
+            "item_seq_len":150,
+            "d_model":128,
+            "d_ffn":256,
+            "dropout": 0.3,
          },
-
          "training":{
-            "weight_decay":1e-2,
-            "num_epochs":300
+            "weight_decay_enc":1e-1,
+            "weight_decay_dec":1e-2,
+            "num_epochs":300,
+            "lr":5e-3,
+            "lr_enc":1e-3,
+            "batch_size":256
          },
      }
 

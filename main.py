@@ -1,5 +1,5 @@
 import os
-import sys
+import gc
 import logging
 import argparse
 import random
@@ -120,6 +120,14 @@ def BPR(output_batch, rating_batch, neg):
     return bpr_loss
 
 def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
+    # ######################### 학습 전, attention map 저장 #########################
+    tmp_batch = next(iter(ds_iter['train']))
+    tmp_batch = {k:v.to(device) for k,v in tmp_batch.items()}
+    model.eval()
+    with torch.no_grad():
+        enc_output, global_preference = model.encoder(tmp_batch)
+        torch.save(model.encoder.global_attention.cpu(), 'soft_attn_b4.pt') # attention map 저장
+    # ############################################################################
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
     logger.info("***** Running Encoder training *****")
@@ -142,35 +150,6 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
         enc_iterator = tqdm(ds_iter['train_enc'], desc="Encoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(enc_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
-            # ######################### 학습 전, attention map 저장 #########################
-            # if epoch==0 and step==0:
-            #     with torch.no_grad():
-            #         enc_output, global_preference = model.encoder(batch)
-            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_0.pt') # attention map 저장
-            #         torch.save(batch['item_rating'].cpu(), 'batch_global_rating.pt')
-            #         torch.save(batch['user_seq'].cpu(), 'batch_user_seq.pt')
-            #         torch.save(batch['item_list'].cpu(), 'batch_item_seq.pt')
-                    
-            # elif epoch==50 and step==0:
-            #     with torch.no_grad():
-            #         enc_output, global_preference = model.encoder(batch)
-            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_50.pt') # attention map 저장
-                    
-            # elif epoch==100 and step==0:
-            #     with torch.no_grad():
-            #         enc_output, global_preference = model.encoder(batch)
-            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_100.pt') # attention map 저장
-                    
-            # elif epoch==150 and step==0:
-            #     with torch.no_grad():
-            #         enc_output, global_preference = model.encoder(batch)
-            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_150.pt') # attention map 저장
-            
-            # elif epoch==200 and step==0:
-            #     with torch.no_grad():
-            #         enc_output, global_preference = model.encoder(batch)
-            #         torch.save(model.encoder.global_attention.cpu(), 'global_attn_200.pt') # attention map 저장
-            # ############################################################################
             # forward pass
             enc_output, global_preference = model.encoder(batch)
 
@@ -249,25 +228,12 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     init_t = time.time()
     total_time = 0
     update_cnt = 0
-    
-    # if device.type=='cuda':
-    #     start = torch.cuda.Event(enable_timing=True)
-    #     end = torch.cuda.Event(enable_timing=True)
-    #     stream = torch.cuda.current_stream(device=device)
-    #     start.record(stream)
-
-    
-        # validation
-        # if device.type=='cuda':
-        #     end.record(stream)
-        #     torch.cuda.synchronize()
         
     lr_lst = []
     metrics = Metrics()
     for epoch in range(total_epochs):
         losses = AverageMeter()
         main_losses = AverageMeter()
-        sub_losses = AverageMeter()
         rank_losses = AverageMeter()
         # decoder 학습
         dec_iterator = tqdm(ds_iter['train'], desc="Decoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
@@ -280,11 +246,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             main_loss = metrics.RMSE(output, batch['anchor_ratings'], main_mask)
             main_losses.update(main_loss.item())
 
-            rank_mask = (batch['anchor_items'] != 0)
             rank_logit = F.log_softmax(output, dim=-1).float()
             rank_target = F.softmax(batch['anchor_ratings'], dim=-1)
             rank_loss = F.kl_div(rank_logit, rank_target, reduction='batchmean')
-            # rank_loss = metrics.BPR(output, batch['anchor_ratings'].float(), args.neg) # 추후에, 하나로 합친 결과에 대한 loss계산하는 방식으로 추가 실험
             rank_losses.update(rank_loss.item())
             
     
@@ -334,11 +298,10 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
 def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_ndcg, update_cnt):
     eval_losses = AverageMeter()
-    model.eval()
-    
     metrics = Metrics()
-    total_rmse, total_mae = 0.0, 0.0
     output_df = pd.DataFrame()
+    total_rmse, total_mae = 0.0, 0.0
+    model.eval()
     with torch.no_grad():
         
         dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
@@ -396,10 +359,18 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     total_rmse /= (step+1)
     total_mae /= (step+1)
     
-    rmse_score = -np.exp(-(best_rmse/total_rmse))+1
-    base_score = -np.exp(-1)+1
+    rmse_score = (-np.exp(-(best_rmse/total_rmse))+1)
+    base_score = (-np.exp(-1)+1)
     
-    if rmse_score+total_ndcg>base_score+best_ndcg:
+     # 상대 개선 비율 계산
+    ndcg_ratio = total_ndcg / best_ndcg if best_ndcg > 0 else 1.0
+    rmse_ratio = best_rmse / rmse if rmse > 0 else 1.0
+
+    # 조건 비교 (score 없이)
+    improved = (0.5 * ndcg_ratio + 0.5 * rmse_ratio) > 1.0
+    
+    # if (rmse_score-base_score)*1.2+(total_ndcg-best_ndcg)>0:
+    if improved:
         print(f"RMSE Score : {rmse_score} / , NDCG DIFF : {total_ndcg-best_ndcg}")
     # if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
         best_ndcg = total_ndcg
@@ -415,7 +386,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
 
     return eval_losses.avg, best_rmse, best_ndcg, total_ndcg, total_rmse, update_cnt
     
-def eval2(model, ds_iter):
+def eval(model, ds_iter):
     model.eval()
     metrics = Metrics()
     # if device.type=='cuda':
@@ -539,20 +510,10 @@ def get_args():
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--d_model', type=int, default=128)
-    parser.add_argument('--d_ffn', type=int, default=256)
-    parser.add_argument('--num_heads', type=int, default=8, help="num enc layers")
-    parser.add_argument('--enc_blocks', type=int, default=1, help="num enc layers")
-    parser.add_argument('--dec_blocks', type=int, default=1, help="num dec layers")
-    parser.add_argument('--dropout', type=float, default=0.3, help="num dec layers")
-    parser.add_argument('--n_experts', type=int, default=2, help="MoE number of total experts")
-    parser.add_argument('--topk', type=int, default=1, help="MoE number of experts")
-    parser.add_argument('--lr_enc', type=float, default=5e-3)
-    parser.add_argument('--lr', type=float, default=5e-3) 
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
-    parser.add_argument('--user_seq_len', type=int, default=50, help="user random walk sequence length")
+    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
@@ -601,7 +562,11 @@ def main():
     model_config = Config[args.dataset]["model"]
     training_config = Config[args.dataset]["training"]
     # batch size update
-    training_config["batch_size"] = args.bs
+    # training_config["batch_size"] = args.bs
+    if args.dataset=='ciao_timestamp':
+        test_bs = 1024
+    else:
+        test_bs = 128
     
     # dataset & dataloader
     train_enc = EncoderDataset(total_train)
@@ -610,10 +575,10 @@ def main():
     test_ds = DecoderDataset(total_test)
     
     ds_iter = {
-            "train_enc":DataLoader(train_enc, batch_size = training_config["batch_size"]*args.augs, shuffle=True, num_workers=2),
-            "train":DataLoader(train_ds, batch_size = training_config["batch_size"]*args.augs, shuffle=True, num_workers=2),
-            "valid":DataLoader(valid_ds, batch_size = 1024, shuffle=False, num_workers=1),
-            "test":DataLoader(test_ds, batch_size = 1024, shuffle=False, num_workers=1)
+            "train_enc":DataLoader(train_enc, batch_size = training_config['batch_size']*args.augs, shuffle=True, num_workers=4),
+            "train":DataLoader(train_ds, batch_size = training_config['batch_size'], shuffle=True, num_workers=4),
+            "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
+            "test":DataLoader(test_ds, batch_size = test_bs, shuffle=False, num_workers=1)
     }
     
     ######################################################### model initialization #########################################################
@@ -622,23 +587,10 @@ def main():
     model_config["num_user"] = data_making.num_user
     model_config["num_item"] = data_making.num_item
     model_config['min_item_len'] = min_item_len
+    model_config['user_seq_len'] = args.user_seq_len
+    model_config['item_seq_len'] = args.user_seq_len*args.item_per_user
     model_config["max_user_degree"] = data_making.max_user_degree
     model_config["max_item_degree"] = data_making.max_item_degree
-    model_config['user_seq_len'] = args.user_seq_len if model_config['user_seq_len']!=args.user_seq_len else model_config['user_seq_len']
-    model_config['item_seq_len'] = args.user_seq_len*args.item_per_user if model_config['item_seq_len']!=args.user_seq_len*args.item_per_user else model_config['item_seq_len']
-    model_config['enc_blocks'] = args.enc_blocks if model_config['enc_blocks']!=args.enc_blocks else model_config['enc_blocks']
-    model_config['dec_blocks'] = args.dec_blocks if model_config['dec_blocks']!=args.dec_blocks else model_config['dec_blocks']
-    model_config['num_heads'] = args.num_heads if model_config['num_heads']!=args.num_heads else model_config['num_heads']
-    model_config['d_model'] = args.d_model if model_config['d_model']!=args.d_model else model_config['d_model']
-    model_config['d_ffn'] = args.d_ffn if model_config['d_ffn']!=args.d_ffn else model_config['d_ffn']
-    model_config['dropout'] = args.dropout if model_config['dropout']!=args.dropout else model_config['dropout']
-    model_config['n_experts'] = args.n_experts if model_config['n_experts']!=args.n_experts else model_config['n_experts']
-    model_config['topk'] = args.topk if model_config['topk']!=args.topk else model_config['topk']
-    
-    
-    # training config
-    training_config['lr'] = args.lr if training_config['lr']!=args.lr else training_config['lr']
-    training_config['lr_enc'] = args.lr_enc if training_config['lr_enc']!=args.lr_enc else training_config['lr_enc']
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -671,7 +623,7 @@ def main():
     
     name_seed = str(args.seed)
     name_augs = str(args.augs)
-    name_bs = str(args.bs)
+    name_bs = str(training_config['batch_size'])
     name_u_len = str(model_config['user_seq_len'])
     name_i_len = str(model_config['item_seq_len'])
     name_n_heads = str(model_config['num_heads'])
@@ -681,11 +633,9 @@ def main():
     name_d_ffn = str(model_config['d_ffn'])
     name_experts = str(model_config['n_experts'])
     name_topk = str(model_config['topk'])
-    name_dropout = str(args.dropout)
-    # name_lr = str(args.lr)
+    name_dropout = str(model_config['dropout'])
     name_lr = str(training_config['lr'])
     name_lr_enc = str(training_config['lr_enc'])
-    # name_lr_enc = str(args.lr_enc)
     name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler])
     enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
@@ -730,7 +680,7 @@ def main():
             model.encoder.parameters(),
             lr = training_config['lr_enc'],
             betas=[0.9,0.999],
-            weight_decay=training_config['weight_decay'])
+            weight_decay=training_config['weight_decay_enc'])
 
         # Encoder 학습 정의
         if args.enc_scheduler=='rp':
@@ -738,8 +688,8 @@ def main():
             optimizer = optimizer,
             mode = 'min',
             factor = 0.9,
-            patience = 3,
-            min_lr=1e-5,
+            patience = 2,
+            min_lr=5e-5,
             threshold = 1e-3,
             verbose = True
             )
@@ -747,11 +697,11 @@ def main():
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
             first_cycle_steps=10,
-            cycle_mult=2,
+            cycle_mult=1,
             max_lr = training_config['lr_enc'],
             min_lr=1e-4,
-            warmup_steps=5,
-            gamma=0.8,
+            warmup_steps=3,
+            gamma=0.9,
             )
         
         if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
@@ -760,13 +710,17 @@ def main():
             print("Best Encoder model loaded!")
             checkpoint = torch.load(training_config['enc_checkpoint_path'])
             model.encoder.load_state_dict(checkpoint['model_state_dict'])
+            
+        del optimizer
+        gc.collect()
+        torch.cuda.empty_cache()
         
         # Decoder 학습
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr = training_config['lr'],
             betas=[0.9,0.999],
-            weight_decay=training_config['weight_decay'])
+            weight_decay=training_config['weight_decay_dec'])
                     
         if args.dec_scheduler=='rp':
             # decoder 초기 LR 재설정
@@ -778,7 +732,7 @@ def main():
             mode = 'min',
             factor = 0.9,
             patience = 2,
-            min_lr=1e-5,
+            min_lr=5e-5,
             threshold = 1e-3,
             verbose = True
             )
@@ -794,7 +748,7 @@ def main():
             # )
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=10,
+            first_cycle_steps=100,
             cycle_mult=2,
             max_lr = training_config['lr'],
             min_lr=1e-4,
@@ -811,17 +765,16 @@ def main():
     ### eval ###
     print(checkpoint_path)
     if os.path.exists(checkpoint_path): #and checkpoint_path != os.getcwd() + '/checkpoints/test.model':
+        model.eval()
         with torch.no_grad():
             batch = next(iter(ds_iter['train']))
             batch = {k:v.to(device) for k,v in batch.items()}
-            _ = model(batch)
-            torch.save(model.encoder.global_attention.cpu(), 'soft_attn_b4.pt') # attention map 저장
             checkpoint = torch.load(checkpoint_path)
             model.load_state_dict(checkpoint["model_state_dict"])
             print("loading the best model from: " + checkpoint_path)
+            eval(model, ds_iter)
             _ = model(batch)
             torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
-            eval2(model, ds_iter)
 
     torch.cuda.empty_cache()
 

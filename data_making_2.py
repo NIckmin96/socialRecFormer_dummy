@@ -29,17 +29,18 @@ class DatasetMaking:
         
         # Shuffle and split Rating dataframe
         self.rating_train, self.rating_valid, self.rating_test = utils.shuffle_and_split_dataset(data_path, df_len=self.rating_df.shape[0], test=args.test_ratio, seed=args.seed, regen=args.regen)
+
+        # Filter Social dataframe by Rating dataframe and Split
+        self.social_train, self.rating_train = utils.generate_social_dataset(data_path, 'train', self.rating_train, self.trust_df, seed=args.seed, regen=args.regen)
+        self.social_valid, self.rating_valid = utils.generate_social_dataset(data_path, 'valid', self.rating_valid, self.trust_df, seed=args.seed, regen=args.regen)
+        self.social_test, self.rating_test = utils.generate_social_dataset(data_path, 'test', self.rating_test, self.trust_df, seed=args.seed, regen=args.regen)
+        
         a = self.rating_train.groupby('user_id')['product_id'].apply(len).max()
         b = self.rating_valid.groupby('user_id')['product_id'].apply(len).max()
         c = self.rating_test.groupby('user_id')['product_id'].apply(len).max()
         print(a,b,c)
         self.min_item_len = c
         print(self.min_item_len)
-
-        # Filter Social dataframe by Rating dataframe and Split
-        self.social_train, self.rating_train = utils.generate_social_dataset(data_path, 'train', self.rating_train, self.trust_df, seed=args.seed, regen=args.regen)
-        self.social_valid, self.rating_valid = utils.generate_social_dataset(data_path, 'valid', self.rating_valid, self.trust_df, seed=args.seed, regen=args.regen)
-        self.social_test, self.rating_test = utils.generate_social_dataset(data_path, 'test', self.rating_test, self.trust_df, seed=args.seed, regen=args.regen)
 
         # Random Walk Sequence 생성
         self.random_walk_train, rw_train_path = utils.generate_social_random_walk_sequence(data_path, self.rating_train, self.social_train, walk_length=args.user_seq_len, augs=args.augs, data_split_seed=args.seed, split='train', regen=args.regen)
