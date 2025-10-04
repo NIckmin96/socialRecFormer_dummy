@@ -28,6 +28,7 @@ class Transformer(nn.Module):
         self.encoder = Encoder(
             user_seq_len=user_seq_len,
             item_seq_len=item_seq_len,
+            min_item_len=min_item_len,
             user_embed=self.user_embed,
             item_embed=self.item_embed,
             d_model=d_model,
@@ -38,24 +39,8 @@ class Transformer(nn.Module):
             n_experts=n_experts,
             topk=topk
         )
-        # decoder 선언
-        self.decoder = Decoder(
-            user_seq_len=user_seq_len,
-            item_seq_len=min_item_len, # anchor item 최대 길이
-            user_embed=self.user_embed,
-            item_embed=self.item_embed,
-            d_model=d_model,
-            d_ffn=d_ffn,
-            num_heads=num_heads,
-            dropout=dropout,
-            num_layers=dec_blocks,
-            n_experts=n_experts,
-            topk=topk
-        )
     
     def forward(self, batch):
-        enc_output, global_preference = self.encoder(batch)
-        output = self.decoder(batch, enc_output)
+        global_preference, local_preference = self.encoder(batch)
         
-        
-        return output, global_preference
+        return global_preference, local_preference

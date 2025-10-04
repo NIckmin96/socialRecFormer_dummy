@@ -119,98 +119,6 @@ def BPR(output_batch, rating_batch, neg):
         
     return bpr_loss
 
-def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
-    # ######################### 학습 전, attention map 저장 #########################
-    tmp_batch = next(iter(ds_iter['train']))
-    tmp_batch = {k:v.to(device) for k,v in tmp_batch.items()}
-    model.eval()
-    with torch.no_grad():
-        enc_output, global_preference = model.encoder(tmp_batch)
-        torch.save(model.encoder.global_attention.cpu(), 'soft_attn_b4.pt') # attention map 저장
-    # ############################################################################
-
-    # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
-    logger.info("***** Running Encoder training *****")
-    logger.info("Total steps = %d", len(ds_iter['train_enc']))
-
-    best_rmse = 9999.0
-    best_mae = 9999.0
-
-    checkpoint_path = training_config['enc_checkpoint_path']
-    total_epochs = training_config["num_epochs"]
-    print(total_epochs)
-
-    update_cnt = 0
-    model.train()
-    metrics = Metrics()
-    # Training step
-    for epoch in range(total_epochs):
-        sub_losses = AverageMeter()
-        # encoder 학습
-        enc_iterator = tqdm(ds_iter['train_enc'], desc="Encoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
-        for step, batch in enumerate(enc_iterator):
-            batch = {k:v.to(device) for k,v in batch.items()}
-            # forward pass
-            enc_output, global_preference = model.encoder(batch)
-
-            sub_mask = (batch['item_rating'] != 0)
-            sub_loss = metrics.RMSE(global_preference, batch['item_rating'], sub_mask)
-            sub_losses.update(sub_loss.item())
-            
-            nn.utils.clip_grad_value_(model.encoder.parameters(), clip_value=1) # Gradient Clipping
-            optimizer.zero_grad()            
-            sub_loss.backward()
-            optimizer.step()
-            enc_iterator.set_description(
-                        "Encoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(enc_iterator), sub_losses.avg))
-            
-            
-        valid_loss, best_rmse, valid_rmse, update_cnt = valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt)
-        if args.enc_scheduler=='rp':
-            lr_scheduler.step(valid_rmse)
-        else:
-            lr_scheduler.step()
-            
-        print(f"Epoch {epoch:03d} || Encoder Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} ||\n")
-        if update_cnt==30: 
-            break
-
-def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt):
-    eval_losses = AverageMeter()
-    model.eval()
-    
-    metrics = Metrics()
-    total_rmse, total_mae = 0.0, 0.0
-    
-    with torch.no_grad():
-        dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
-        for step, batch in enumerate(dec_iterator):     
-            batch = {k:v.to(device) for k,v in batch.items()}
-            
-            enc_output, global_preference = model.encoder(batch)
-            
-            mask = (batch['item_rating'] != 0)
-            rmse = metrics.RMSE(global_preference, batch['item_rating'], mask).item()
-            mae = metrics.MAE(global_preference, batch['item_rating'], mask).item()
-            
-            total_rmse += rmse
-            total_mae += mae
-            eval_losses.update(rmse)
-            
-    total_rmse /= (step+1)
-    total_mae /= (step+1)
-            
-    if total_rmse < best_rmse: 
-        best_rmse = total_rmse
-        best_mae = total_mae
-        torch.save({"model_state_dict":model.encoder.state_dict()}, checkpoint_path)
-        print(f'\t best model saved: epoch = {epoch}, test RMSE = {total_rmse:.6f}')
-        update_cnt = 0
-    else:
-        update_cnt += 1
-
-    return eval_losses.avg, best_rmse, total_rmse, update_cnt
-
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
@@ -240,20 +148,25 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
         for step, batch in enumerate(dec_iterator):
             batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
-            output, global_preference = model(batch)
+            global_preference, local_preference = model(batch)
+
+            sub_mask = (batch['item_rating']!=0)
+            sub_loss = metrics.RMSE(global_prefzerence, batch['item_rating'], sub_mask)
+            sub_losses.update(sub_loss.item())
             
             main_mask = (batch['anchor_ratings'] != 0)
-            main_loss = metrics.RMSE(output, batch['anchor_ratings'], main_mask)
+            # print(main_mask.size(), local_preference.size(), batch['anchor_ratings'].size())
+            main_loss = metrics.RMSE(local_preference, batch['anchor_ratings'], main_mask)
             main_losses.update(main_loss.item())
 
-            rank_logit = F.log_softmax(output, dim=-1).float()
+            rank_mask = (batch['anchor_items'] != 0)
+            rank_logit = F.log_softmax(local_preference, dim=-1).float()
             rank_target = F.softmax(batch['anchor_ratings'], dim=-1)
             rank_loss = F.kl_div(rank_logit, rank_target, reduction='batchmean')
             rank_losses.update(rank_loss.item())
             
     
-            loss = main_loss + rank_loss
-            # loss = main_loss
+            loss = main_loss + rank_loss + sub_loss
             losses.update(loss.item())
             
             
@@ -265,8 +178,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                         "Decoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(dec_iterator), losses.avg))
             
         # total_time += (start.elapsed_time(end))
-        valid_loss, best_rmse, best_ndcg, valid_ndcg, valid_rmse, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_ndcg, update_cnt)
-        if args.dec_scheduler=='rp':
+        # valid_loss, best_rmse, best_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        if args.scheduler=='rp':
             lr_scheduler.step(valid_rmse)
         else:
             lr_scheduler.step()
@@ -280,7 +194,9 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
 
         # epoch_rank_loss = rank_losses.avg
 
-        print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Sub Loss: {sub_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        # print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_rmse:.4f} || best MAE: {best_mae:.4f} ||\n")
         if update_cnt > 20: 
             break
     writer.close()
@@ -308,15 +224,15 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
         for step, batch in enumerate(dec_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
-            output, global_preference = model(batch)
+            global_preference, local_preference = model(batch)
             
             # mask = (batch['item_rating'] != 0)
             # rmse = metrics.RMSE(global_preference, batch['item_rating'], mask).item()
             # mae = metrics.MAE(global_preference, batch['item_rating'], mask).item()
             
             mask = (batch['anchor_ratings'] != 0)
-            rmse = metrics.RMSE(output, batch['anchor_ratings'], mask).item()
-            mae = metrics.MAE(output, batch['anchor_ratings'], mask).item()
+            rmse = metrics.RMSE(local_preference, batch['anchor_ratings'], mask).item()
+            mae = metrics.MAE(local_preference, batch['anchor_ratings'], mask).item()
             
             total_rmse += rmse
             total_mae += mae
@@ -327,14 +243,14 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
             
             # zero padding인 경우 제외
             mask = (batch['anchor_items']!=0)
-            output = output*mask
+            local_preference = local_preference*mask
             
             item_lst, rating_lst, output_lst = [],[],[]
             for i in range(batch['anchor_user'].size(0)):
                 mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
                 items = items = batch['anchor_items'][i][mask].data.cpu().tolist()
                 ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
-                outputs = output[i][mask].data.cpu().tolist()
+                outputs = local_preference[i][mask].data.cpu().tolist()
                 assert len(items)==len(ratings)==len(outputs)
                 item_lst.append(items)
                 rating_lst.append(ratings)
@@ -408,11 +324,11 @@ def eval(model, ds_iter):
         for step, batch in enumerate(epoch_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
-            output, global_preference = model(batch)
+            global_preference, local_preference = model(batch)
             
             mask = (batch['anchor_ratings'] != 0)
-            rmse = metrics.RMSE(output, batch['anchor_ratings'], mask).item()
-            mae = metrics.MAE(output, batch['anchor_ratings'], mask)
+            rmse = metrics.RMSE(local_preference, batch['anchor_ratings'], mask).item()
+            mae = metrics.MAE(local_preference, batch['anchor_ratings'], mask)
             total_rmse += rmse
             total_mae += mae
             
@@ -428,7 +344,7 @@ def eval(model, ds_iter):
                 mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
                 items = batch['anchor_items'][i][mask].data.cpu().tolist()
                 ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
-                outputs = output[i][mask].data.cpu().tolist()
+                outputs = local_preference[i][mask].data.cpu().tolist()
                 assert len(items)==len(ratings)==len(outputs)
                 item_lst.append(items)
                 rating_lst.append(ratings)
@@ -521,9 +437,7 @@ def get_args():
     parser.add_argument('--neg', type=bool, default=False)
 
     # tuning
-    # parser.add_argument('--scheduler', type=str, default='rp')
-    parser.add_argument('--enc_scheduler', type=str, default='rp')
-    parser.add_argument('--dec_scheduler', type=str, default='rp')
+    parser.add_argument('--scheduler', type=str, default='cs')
     
     args = parser.parse_args()
     return args
@@ -641,9 +555,7 @@ def main():
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
     checkpoint_enc = os.path.join(checkpoint_dir, f'{enc_name}_enc.model') # set model name
     print(checkpoint_path, "\n")
-    print(checkpoint_enc, "\n")
     training_config["checkpoint_path"] = checkpoint_path
-    training_config["enc_checkpoint_path"] = checkpoint_enc
 
     # gpu device선택
     device_ids = list(range(torch.cuda.device_count()))
@@ -675,58 +587,15 @@ def main():
     ### TensorBoard writer preparation ###
     writer = SummaryWriter(os.path.join(log_dir,f"{args.name}.tensorboard"))
     ### train ###
-    if not args.eval:
-        optimizer = torch.optim.AdamW(
-            model.encoder.parameters(),
-            lr = training_config['lr_enc'],
-            betas=[0.9,0.999],
-            weight_decay=training_config['weight_decay_enc'])
-
-        # Encoder 학습 정의
-        if args.enc_scheduler=='rp':
-            lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer = optimizer,
-            mode = 'min',
-            factor = 0.9,
-            patience = 2,
-            min_lr=5e-5,
-            threshold = 1e-3,
-            verbose = True
-            )
-        else:
-            lr_scheduler = CosineAnnealingWarmupRestarts(
-            optimizer=optimizer,
-            first_cycle_steps=10,
-            cycle_mult=1,
-            max_lr = training_config['lr_enc'],
-            min_lr=1e-4,
-            warmup_steps=3,
-            gamma=0.9,
-            )
+    if not args.eval:        
         
-        if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
-            train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config)
-        else:
-            print("Best Encoder model loaded!")
-            checkpoint = torch.load(training_config['enc_checkpoint_path'])
-            model.encoder.load_state_dict(checkpoint['model_state_dict'])
-            
-        del optimizer
-        gc.collect()
-        torch.cuda.empty_cache()
-        
-        # Decoder 학습
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr = training_config['lr'],
             betas=[0.9,0.999],
             weight_decay=training_config['weight_decay_dec'])
                     
-        if args.dec_scheduler=='rp':
-            # decoder 초기 LR 재설정
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = training_config['lr']
-
+        if args.scheduler=='rp':
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer = optimizer,
             mode = 'min',
