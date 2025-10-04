@@ -60,8 +60,8 @@ class DecoderLayer(nn.Module):
         # 2-2. MoE / FFN
         residual = x
         x = self.norm_cross1_moe(x)
-        x = self.ffn_cross1(x)
-        # x = self.moe_cross1(x)
+        # x = self.ffn_cross1(x)
+        x = self.moe_cross1(x)
         x = self.dropout_cross1_moe(x)
         x = x + residual
         

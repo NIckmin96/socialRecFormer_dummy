@@ -54,8 +54,8 @@ class EncoderLayer(nn.Module):
         
         # 2-1. MoE/FFN
         residual = x
-        # x = self.norm_moe2(x)
-        x = self.ffn2(x)
+        x = self.norm_moe2(x)
+        # x = self.ffn2(x)
         x = self.moe2(x)
         # Add & Norm
         x = self.dropout_moe2(x)
