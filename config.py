@@ -1,7 +1,7 @@
 ciao_timestamp={  
          "model":{
             "enc_blocks":2,
-            "dec_blocks":2,
+            "dec_blocks":1,
             "num_heads":8,
             "n_experts":2,
             "topk":1,
