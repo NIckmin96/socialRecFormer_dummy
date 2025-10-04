@@ -120,6 +120,12 @@ def BPR(output_batch, rating_batch, neg):
     return bpr_loss
 
 def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
+    model.eval()
+    with torch.no_grad():
+        tmp_batch = next(iter(ds_iter['train']))
+        tmp_batch = {k:v.to(device) for k,v in tmp_batch.items()}
+        _ = model(tmp_batch)
+        torch.save(model.encoder.global_attention.cpu(), 'enc_only_attn_b4.pt') # attention map 저장
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
     logger.info("***** Running training *****")
@@ -142,6 +148,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
     for epoch in range(total_epochs):
         losses = AverageMeter()
         main_losses = AverageMeter()
+        sub_losses = AverageMeter()
         rank_losses = AverageMeter()
         # decoder 학습
         dec_iterator = tqdm(ds_iter['train'], desc="Decoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
@@ -151,7 +158,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             global_preference, local_preference = model(batch)
 
             sub_mask = (batch['item_rating']!=0)
-            sub_loss = metrics.RMSE(global_prefzerence, batch['item_rating'], sub_mask)
+            sub_loss = metrics.RMSE(global_preference, batch['item_rating'], sub_mask)
             sub_losses.update(sub_loss.item())
             
             main_mask = (batch['anchor_ratings'] != 0)
@@ -178,8 +185,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
                         "Decoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(dec_iterator), losses.avg))
             
         # total_time += (start.elapsed_time(end))
-        # valid_loss, best_rmse, best_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
-        valid_loss, best_rmse, best_mae, best_ndcg, valid_ndcg, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_mae, best_ndcg, update_cnt)
+        valid_loss, best_rmse, best_ndcg, valid_ndcg, valid_rmse, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_ndcg, update_cnt)
         if args.scheduler=='rp':
             lr_scheduler.step(valid_rmse)
         else:
@@ -429,7 +435,7 @@ def get_args():
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
-    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
+    parser.add_argument('--user_seq_len', type=int, default=40, help="user random walk sequence length")
     parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
@@ -549,11 +555,8 @@ def main():
     name_topk = str(model_config['topk'])
     name_dropout = str(model_config['dropout'])
     name_lr = str(training_config['lr'])
-    name_lr_enc = str(training_config['lr_enc'])
-    name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler])
-    enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler])
+    name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.scheduler])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
-    checkpoint_enc = os.path.join(checkpoint_dir, f'{enc_name}_enc.model') # set model name
     print(checkpoint_path, "\n")
     training_config["checkpoint_path"] = checkpoint_path
 
@@ -643,7 +646,8 @@ def main():
             print("loading the best model from: " + checkpoint_path)
             eval(model, ds_iter)
             _ = model(batch)
-            torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
+            torch.save(model.encoder.global_attention.cpu(), 'enc_only_attn.pt') # attention map 저장
+            print("attention saved")
 
     torch.cuda.empty_cache()
 

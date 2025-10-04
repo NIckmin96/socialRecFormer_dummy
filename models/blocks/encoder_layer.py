@@ -71,12 +71,12 @@ class PredLayer(nn.Module):
     def __init__(self, user_seq_len, item_seq_len, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1):
         super(PredLayer, self).__init__()
 
-        self.norm = nn.BatchNorm1d(user_seq_len)
-        self.norm_item = nn.BatchNorm1d(item_seq_len)
+        self.norm = nn.LayerNorm(d_model)
+        self.norm_item = nn.LayerNorm(d_model)
         self.attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.dropout = nn.Dropout(p=dropout)
         
-        self.norm_moe = nn.BatchNorm1d(user_seq_len)
+        self.norm_moe = nn.LayerNorm(d_model)
         self.moe = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
         self.dropout_moe = nn.Dropout(p=dropout)
     
