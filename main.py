@@ -585,8 +585,8 @@ def main():
     test_ds = DecoderDataset(total_test)
     
     ds_iter = {
-            "train_enc":DataLoader(train_enc, batch_size = training_config['batch_size']*args.augs, shuffle=True, num_workers=4),
-            "train":DataLoader(train_ds, batch_size = training_config['batch_size'], shuffle=True, num_workers=4),
+            "train_enc":DataLoader(train_enc, batch_size = training_config['bs_enc'], shuffle=True, num_workers=4),
+            "train":DataLoader(train_ds, batch_size = training_config['bs_dec'], shuffle=True, num_workers=4),
             "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
             "test":DataLoader(test_ds, batch_size = test_bs, shuffle=False, num_workers=1)
     }
@@ -688,8 +688,8 @@ def main():
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer = optimizer,
             mode = 'min',
-            factor = 0.9,
-            patience = 4,
+            factor = 0.7,
+            patience = 2,
             min_lr=1e-5,
             threshold = 1e-3,
             verbose = True
@@ -701,7 +701,7 @@ def main():
             cycle_mult=1,
             max_lr = training_config['lr_enc'],
             min_lr=1e-3,
-            warmup_steps=5,
+            warmup_steps=3,
             gamma=0.9,
             )
         

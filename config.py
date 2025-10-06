@@ -16,7 +16,8 @@ ciao_timestamp={
             "lr_enc":7e-3,
             "lr":4e-3,
             "num_epochs":300,
-            "batch_size":32
+            "bs_enc":32,
+            "bs_dec":64
          },
      }
 
@@ -38,7 +39,8 @@ epinions={
             "lr_enc":7e-3,
             "lr":4e-3,
             "num_epochs":300,
-            "batch_size":32
+            "bs_enc":32,
+            "bs_dec":64
          },
      }
 
