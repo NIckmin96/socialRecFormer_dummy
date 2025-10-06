@@ -7,10 +7,9 @@ from models.layers.feed_forward_network import FeedForwardNetwork, SparseMoE
 
 class DecoderLayer(nn.Module):
     
-    def __init__(self, user_seq_len, item_seq_len, d_model, d_ffn, num_heads, n_experts=8, topk=1, dropout=0.1, last_layer:bool=False):
+    def __init__(self, user_seq_len, item_seq_len, d_model, d_ffn, num_heads, n_experts, topk, dropout,moe):
         super(DecoderLayer, self).__init__()
-
-        self.last_layer_flag = last_layer
+        self.moe = moe
 
         # Self attention
         self.norm_self = nn.LayerNorm(d_model)
@@ -60,8 +59,10 @@ class DecoderLayer(nn.Module):
         # 2-2. MoE / FFN
         residual = x
         x = self.norm_cross1_moe(x)
-        x = self.ffn_cross1(x)
-        # x = self.moe_cross1(x)
+        if self.moe:
+            x = self.moe_cross1(x)
+        else:
+            x = self.ffn_cross1(x)
         x = self.dropout_cross1_moe(x)
         x = x + residual
         

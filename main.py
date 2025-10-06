@@ -364,10 +364,10 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     
      # 상대 개선 비율 계산
     ndcg_ratio = total_ndcg / best_ndcg if best_ndcg > 0 else 1.0
-    rmse_ratio = best_rmse / rmse if rmse > 0 else 1.0
+    rmse_ratio = best_rmse / total_rmse if total_rmse > 0 else 1.0
 
     # 조건 비교 (score 없이)
-    improved = (0.5 * ndcg_ratio + 0.5 * rmse_ratio) > 1.0
+    improved = (0.2 * ndcg_ratio + 0.8 * rmse_ratio) > 1.0
     
     # if (rmse_score-base_score)*1.2+(total_ndcg-best_ndcg)>0:
     if improved:
@@ -375,7 +375,6 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     # if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
-        best_mae = total_mae
         torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
         print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test NDCG@10 = {best_ndcg:.6f}')
         update_cnt = 0
@@ -457,18 +456,19 @@ def eval(model, ds_iter):
     neg_ = neg_.dropna(how='any')
     neg_ndcg = neg_['ndcg@10'].mean()
     neg_precision = neg_['precision@10'].mean()
-    neg_recall = neg_['recall@10'].mean()
+    # neg_recall = neg_['recall@10'].mean()
+    neg_hr = neg_['hr@10'].mean()
     # negative sampling 미포함 + item 개수별 filter x
     non_neg = non_neg_df.apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
     non_neg = non_neg.dropna(how='any')
     non_neg_ndcg = non_neg['ndcg@10'].mean()
     non_neg_precision = non_neg['precision@10'].mean()
-    non_neg_recall = non_neg['recall@10'].mean()
+    # non_neg_recall = non_neg['recall@10'].mean()
     # non neg + item 개수별 filter o
     filtered = non_neg_df[non_neg_df['anchor_items'].apply(len)>=10].apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
     filtered_ndcg = filtered['ndcg@10'].mean()
     filtered_precision = filtered['precision@10'].mean()
-    filtered_recall = filtered['recall@10'].mean()
+    # filtered_recall = filtered['recall@10'].mean()
     total_rmse /= (step+1)
     total_mae /= (step+1)           
     
@@ -484,28 +484,38 @@ def eval(model, ds_iter):
     print("MAE: %2.5f" % total_mae)
     print("################################")
     print("NEG NDCG@10: %2.5f" % neg_ndcg)
-    print("NEG RECALL@10: %2.5f" % neg_recall)
     print("NEG PRECISION@10: %2.5f" % neg_precision)
+    print("NEG HR@10: %2.5f" % neg_hr)
     print("################################")
-    print("TOTAL NDCG@10: %2.5f" % non_neg_ndcg)
-    print("TOTAL RECALL@10: %2.5f" % non_neg_recall)
-    print("TOTAL PRECISION@10: %2.5f" % non_neg_precision)
-    print("################################")
-    print("FILTERED NDCG@10: %2.5f" % filtered_ndcg)
-    print("FILTERED RECALL@10: %2.5f" % filtered_recall)
-    print("FILTERED PRECISION@10: %2.5f" % filtered_precision)
+    # print("TOTAL NDCG@10: %2.5f" % non_neg_ndcg)
+    # print("TOTAL PRECISION@10: %2.5f" % non_neg_precision)
+    # print("################################")
+    # print("FILTERED NDCG@10: %2.5f" % filtered_ndcg)
+    # print("FILTERED PRECISION@10: %2.5f" % filtered_precision)
     # print(f"Precision@5 : {total_precision_5} / Recall@5 : {total_recall_5} / NDCG@5 : {total_ndcg_5}")
     # print(f"Precision@10 : {total_precision_10} / Recall@10 : {total_recall_10} / NDCG@10 : {total_ndcg_10}")
     # print(f"total eval time: {(start.elapsed_time(end))}")
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
     
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def get_args():
+                
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
-    parser.add_argument("--encoder", type=bool, default=False)
+    parser.add_argument("--encoder", type=str2bool, default=False)
+    parser.add_argument("--moe", type=str2bool, default=True)
     parser.add_argument("--device", type=str, default='single')
     parser.add_argument("--id", type=int, default=0)
-    parser.add_argument("--eval", type = bool, default=False)
+    parser.add_argument("--eval", type = str2bool, default=False)
     parser.add_argument("--checkpoint", type = str, default="test",
                         help="load ./checkpoints/model_name.model to evaluation")
     parser.add_argument('--seed', type=int, default=42)
@@ -518,7 +528,7 @@ def get_args():
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
     parser.add_argument('--bs', type=int, default=32, help="Batch size of dataloader")
-    parser.add_argument('--neg', type=bool, default=False)
+    parser.add_argument('--neg', type=str2bool, default=False)
 
     # tuning
     # parser.add_argument('--scheduler', type=str, default='rp')
@@ -591,6 +601,7 @@ def main():
     model_config['item_seq_len'] = args.user_seq_len*args.item_per_user
     model_config["max_user_degree"] = data_making.max_user_degree
     model_config["max_item_degree"] = data_making.max_item_degree
+    model_config['moe'] = str2bool(args.moe)
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -608,7 +619,6 @@ def main():
 
 
     ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
-    print(model_config)
     model = Transformer(**model_config)
 
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
@@ -621,25 +631,13 @@ def main():
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
     
-    name_seed = str(args.seed)
-    name_augs = str(args.augs)
-    name_bs = str(training_config['batch_size'])
-    name_u_len = str(model_config['user_seq_len'])
-    name_i_len = str(model_config['item_seq_len'])
-    name_n_heads = str(model_config['num_heads'])
-    name_n_enc = str(model_config['enc_blocks'])
-    name_n_dec = str(model_config['dec_blocks'])
-    name_d_model = str(model_config['d_model'])
-    name_d_ffn = str(model_config['d_ffn'])
-    name_experts = str(model_config['n_experts'])
-    name_topk = str(model_config['topk'])
-    name_dropout = str(model_config['dropout'])
-    name_lr = str(training_config['lr'])
-    name_lr_enc = str(training_config['lr_enc'])
-    name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler])
-    enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler])
-    checkpoint_path = os.path.join(checkpoint_dir, f'{name}.model') # set model name
-    checkpoint_enc = os.path.join(checkpoint_dir, f'{enc_name}_enc.model') # set model name
+    name_moe = 'moe' if model_config['moe'] else 'ffn'
+    name = ('_').join([str(v) for k,v in model_config.items()]+[str(v) for k,v in training_config.items()]+[name_moe])
+    # name = '_'.join(model_confi/g.values())
+    # name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler, name_moe])
+    # enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler, name_moe])
+    checkpoint_path = os.path.join(checkpoint_dir, f'{name}_{args.dec_scheduler}.model') # set model name
+    checkpoint_enc = os.path.join(checkpoint_dir, f'{name}_{args.enc_scheduler}_enc.model') # set model name
     print(checkpoint_path, "\n")
     print(checkpoint_enc, "\n")
     training_config["checkpoint_path"] = checkpoint_path
@@ -687,7 +685,7 @@ def main():
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer = optimizer,
             mode = 'min',
-            factor = 0.9,
+            factor = 0.8,
             patience = 2,
             min_lr=5e-5,
             threshold = 1e-3,
@@ -696,11 +694,11 @@ def main():
         else:
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=10,
+            first_cycle_steps=20,
             cycle_mult=1,
             max_lr = training_config['lr_enc'],
-            min_lr=1e-4,
-            warmup_steps=3,
+            min_lr=1e-3,
+            warmup_steps=5,
             gamma=0.9,
             )
         
@@ -748,12 +746,12 @@ def main():
             # )
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=100,
-            cycle_mult=2,
+            first_cycle_steps=10,
+            cycle_mult=1,
             max_lr = training_config['lr'],
             min_lr=1e-4,
-            warmup_steps=5,
-            gamma=0.8,
+            warmup_steps=2,
+            gamma=0.9,
             )
         
         train(model, optimizer, lr_scheduler, ds_iter, training_config, writer)
@@ -775,6 +773,10 @@ def main():
             eval(model, ds_iter)
             _ = model(batch)
             torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
+            
+    print(model_config)
+    training_config = {k:v for k,v in training_config.items() if k not in ['checkpoint_path', 'enc_checkpoint_path']}
+    print(training_config)
 
     torch.cuda.empty_cache()
 

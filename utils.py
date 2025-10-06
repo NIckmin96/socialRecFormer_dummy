@@ -244,8 +244,11 @@ class Metrics:
         ideal_items = ideal_items.tolist()
         gt_items = items[ratings!=0].tolist()
         TP = set(rec_items).intersection(set(gt_items))
+        hr = 1 if len(TP)>=1 else 0
         precision = round(len(TP)/new_k, 4)
         recall = round(len(TP)/len(gt_items), 4)
+        # HR@k
+        
 
         return pd.Series({
             'user':user,
@@ -257,6 +260,7 @@ class Metrics:
             f'recall@{k}':float(recall),
             f'rec@{k}':rec_items,
             f'ideal@{k}':ideal_items,
+            f'hr@{k}':hr,
         })
         
         # return ndcg, precision, recall, rec_items, ideal_items
