@@ -14,9 +14,9 @@ ciao_timestamp={
             "weight_decay_enc":1e-1,
             "weight_decay_dec":1e-3,
             "lr_enc":7e-3,
-            "lr":3e-3,
+            "lr":4e-3,
             "num_epochs":300,
-            "batch_size":64
+            "batch_size":32
          },
      }
 
@@ -33,12 +33,12 @@ epinions={
             "moe":True
          },
          "training":{
-            "weight_decay_enc":2e-1,
+            "weight_decay_enc":1e-1,
             "weight_decay_dec":1e-3,
-            "lr_enc":1e-2,
-            "lr":5e-3,
+            "lr_enc":7e-3,
+            "lr":4e-3,
             "num_epochs":300,
-            "batch_size":64
+            "batch_size":32
          },
      }
 

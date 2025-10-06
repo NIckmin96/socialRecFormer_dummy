@@ -359,8 +359,8 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     total_rmse /= (step+1)
     total_mae /= (step+1)
     
-    rmse_score = (-np.exp(-(best_rmse/total_rmse))+1)
-    base_score = (-np.exp(-1)+1)
+    # rmse_score = (-np.exp(-(best_rmse/total_rmse))+1)
+    # base_score = (-np.exp(-1)+1)
     
      # 상대 개선 비율 계산
     ndcg_ratio = total_ndcg / best_ndcg if best_ndcg > 0 else 1.0
@@ -371,7 +371,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     
     # if (rmse_score-base_score)*1.2+(total_ndcg-best_ndcg)>0:
     if improved:
-        print(f"RMSE Score : {rmse_score} / , NDCG DIFF : {total_ndcg-best_ndcg}")
+        # print(f"RMSE Score : {rmse_score} / , NDCG DIFF : {total_ndcg-best_ndcg}")
     # if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
@@ -688,16 +688,16 @@ def main():
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer = optimizer,
             mode = 'min',
-            factor = 0.8,
-            patience = 2,
-            min_lr=5e-5,
+            factor = 0.9,
+            patience = 4,
+            min_lr=1e-5,
             threshold = 1e-3,
             verbose = True
             )
         else:
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=20,
+            first_cycle_steps=10,
             cycle_mult=1,
             max_lr = training_config['lr_enc'],
             min_lr=1e-3,
@@ -752,7 +752,7 @@ def main():
             first_cycle_steps=10,
             cycle_mult=1,
             max_lr = training_config['lr'],
-            min_lr=1e-4,
+            min_lr=1e-3,
             warmup_steps=2,
             gamma=0.9,
             )
