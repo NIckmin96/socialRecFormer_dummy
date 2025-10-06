@@ -397,7 +397,6 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
             # neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))                
             # anchor_items.extend(neg_samples)
             
-            # np.random.seed(seed)
             # np.random.shuffle(anchor_items)
             
             # assert len(anchor_items)>=10
