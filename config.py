@@ -1,6 +1,6 @@
 ciao_timestamp={  
          "model":{
-            "enc_blocks":2,
+            "enc_blocks":3,
             "dec_blocks":2,
             "num_heads":8,
             "n_experts":2,
@@ -11,11 +11,11 @@ ciao_timestamp={
          },
          "training":{
             "weight_decay_enc":1e-1,
-            "weight_decay_dec":1e-3,
+            "weight_decay_dec":1e-2,
             "lr_enc":1e-2,
             "lr":5e-3,
             "num_epochs":300,
-            "batch_size":64
+            "batch_size":32
          },
      }
 
@@ -23,15 +23,15 @@ epinions={
          "model":{
             "enc_blocks":2,
             "dec_blocks":2,
-            "num_heads":4,
-            "n_experts":4,
-            "topk":2,
+            "num_heads":8,
+            "n_experts":2,
+            "topk":1,
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
          },
          "training":{
-            "weight_decay_enc":1e-1,
+            "weight_decay_enc":1e-2,
             "weight_decay_dec":1e-3,
             "lr_enc":1e-2,
             "lr":5e-3,
@@ -42,8 +42,8 @@ epinions={
 
 yelp={
          "model":{
-            "enc_blocks":1,
-            "dec_blocks":1,
+            "enc_blocks":2,
+            "dec_blocks":2,
             "num_heads":8,
             "n_experts":2,
             "topk":2,
@@ -54,11 +54,11 @@ yelp={
             "dropout": 0.3,
          },
          "training":{
-            "weight_decay_enc":5e-2,
+            "weight_decay_enc":1e-1,
             "weight_decay_dec":1e-2,
             "num_epochs":300,
             "lr":5e-3,
-            "lr_enc":5e-3,
+            "lr_enc":1e-2,
             "batch_size":128
          },
      }

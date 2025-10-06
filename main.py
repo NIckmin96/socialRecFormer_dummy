@@ -359,19 +359,19 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     total_rmse /= (step+1)
     total_mae /= (step+1)
     
-    rmse_score = (-np.exp(-(best_rmse/total_rmse))+1)
-    base_score = (-np.exp(-1)+1)
+    # rmse_score = (-np.exp(-(best_rmse/total_rmse))+1)
+    # base_score = (-np.exp(-1)+1)
     
      # 상대 개선 비율 계산
     ndcg_ratio = total_ndcg / best_ndcg if best_ndcg > 0 else 1.0
-    rmse_ratio = best_rmse / rmse if rmse > 0 else 1.0
+    rmse_ratio = best_rmse / total_rmse if total_rmse > 0 else 1.0
 
     # 조건 비교 (score 없이)
     improved = (0.5 * ndcg_ratio + 0.5 * rmse_ratio) > 1.0
     
     # if (rmse_score-base_score)*1.2+(total_ndcg-best_ndcg)>0:
     if improved:
-        print(f"RMSE Score : {rmse_score} / , NDCG DIFF : {total_ndcg-best_ndcg}")
+        # print(f"RMSE Score : {rmse_score} / , NDCG DIFF : {total_ndcg-best_ndcg}")
     # if ((1/total_rmse)*0.5+(total_ndcg)*0.5 > (1/best_rmse)*0.5+(best_ndcg)*0.5): 
         best_ndcg = total_ndcg
         best_rmse = total_rmse
