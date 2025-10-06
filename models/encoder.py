@@ -11,7 +11,7 @@ class Encoder(nn.Module):
     Encoder for modeling user representation (in social graph)
     """
     # def __init__(self, max_degree, num_user, d_model, d_ffn, num_heads, dropout, num_layers):
-    def __init__(self, user_seq_len, item_seq_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk):
+    def __init__(self, user_seq_len, item_seq_len, user_embed, item_embed, d_model, d_ffn, num_heads, dropout, num_layers, n_experts, topk, moe):
         """
         Args:
             data_path: path to dataset (ciao or epinions)
@@ -38,7 +38,8 @@ class Encoder(nn.Module):
                 num_heads = num_heads,
                 n_experts = n_experts,
                 topk = topk,
-                dropout = dropout
+                dropout = dropout,
+                moe = moe
             ) for _ in range(num_layers)]
         )
         

@@ -248,8 +248,7 @@ def find_next_node(input_G, previous_node, current_node): # 확률적으로, anc
     if previous_node!=None:
         if current_node in input_G.nodes():
             neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
-        else:
-            # neighbors = list(set(input_G.nodes())-{current_node})
+        else: # current_node == 0
             return 0
         
         n = len(neighbors)

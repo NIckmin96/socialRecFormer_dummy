@@ -1,19 +1,20 @@
 ciao_timestamp={  
          "model":{
-            "enc_blocks":3,
+            "enc_blocks":1,
             "dec_blocks":2,
             "num_heads":8,
             "n_experts":2,
-            "topk":1,
+            "topk":2,
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
+            "moe":True
          },
          "training":{
             "weight_decay_enc":1e-1,
-            "weight_decay_dec":1e-2,
-            "lr_enc":1e-2,
-            "lr":5e-3,
+            "weight_decay_dec":1e-3,
+            "lr_enc":7e-3,
+            "lr":3e-3,
             "num_epochs":300,
             "batch_size":32
          },
@@ -21,22 +22,23 @@ ciao_timestamp={
 
 epinions={
          "model":{
-            "enc_blocks":2,
+            "enc_blocks":1,
             "dec_blocks":2,
             "num_heads":8,
             "n_experts":2,
-            "topk":1,
+            "topk":2,
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
+            "moe":True
          },
          "training":{
-            "weight_decay_enc":1e-2,
+            "weight_decay_enc":2e-1,
             "weight_decay_dec":1e-3,
             "lr_enc":1e-2,
             "lr":5e-3,
             "num_epochs":300,
-            "batch_size":128
+            "batch_size":64
          },
      }
 
@@ -52,6 +54,7 @@ yelp={
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
+            "moe":True
          },
          "training":{
             "weight_decay_enc":1e-1,
@@ -73,6 +76,7 @@ Douban={
             "d_model":128,
             "d_ffn":256,
             "dropout": 0.3,
+            "moe":True
          },
          "training":{
             "weight_decay_enc":1e-1,
