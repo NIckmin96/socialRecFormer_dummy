@@ -523,8 +523,8 @@ def get_args():
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
-    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
-    parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
+    parser.add_argument('--user_seq_len', type=int, default=40, help="user random walk sequence length")
+    parser.add_argument('--item_per_user', type=int, default=6, help="number of items per user")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
     parser.add_argument('--bs', type=int, default=32, help="Batch size of dataloader")
@@ -614,8 +614,11 @@ def main():
     ###  set the random seeds for deterministic results. ####
     SEED = args.seed
     random.seed(SEED)
+    np.random.seed(args.seed)
     torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
     torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
     ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
@@ -685,16 +688,16 @@ def main():
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer = optimizer,
             mode = 'min',
-            factor = 0.8,
-            patience = 2,
-            min_lr=5e-5,
+            factor = 0.9,
+            patience = 4,
+            min_lr=1e-5,
             threshold = 1e-3,
             verbose = True
             )
         else:
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=20,
+            first_cycle_steps=10,
             cycle_mult=1,
             max_lr = training_config['lr_enc'],
             min_lr=1e-3,
@@ -749,7 +752,7 @@ def main():
             first_cycle_steps=10,
             cycle_mult=1,
             max_lr = training_config['lr'],
-            min_lr=1e-4,
+            min_lr=1e-3,
             warmup_steps=2,
             gamma=0.9,
             )
