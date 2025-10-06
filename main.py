@@ -523,8 +523,8 @@ def get_args():
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
-    parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
-    parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
+    parser.add_argument('--user_seq_len', type=int, default=40, help="user random walk sequence length")
+    parser.add_argument('--item_per_user', type=int, default=6, help="number of items per user")
     parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
     parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
     parser.add_argument('--bs', type=int, default=32, help="Batch size of dataloader")
@@ -614,8 +614,11 @@ def main():
     ###  set the random seeds for deterministic results. ####
     SEED = args.seed
     random.seed(SEED)
+    np.random.seed(args.seed)
     torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
     torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
     ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
