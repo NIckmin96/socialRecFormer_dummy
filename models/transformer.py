@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from models.encoder import Encoder
 from models.decoder import Decoder
 
-from models.layers.encoding_modules import SocialNodeEncoder, SpatialEncoder, ItemNodeEncoder, RatingEncoder, RatingBias, RankBias
+from models.layers.encoding_modules import SocialNodeEncoder, ItemNodeEncoder
 
 
 class Transformer(nn.Module):
@@ -24,6 +24,7 @@ class Transformer(nn.Module):
             max_degree = max_item_degree,
             d_model = d_model
         )
+        
         # encoder 선언
         self.encoder = Encoder(
             user_seq_len=user_seq_len,
@@ -38,6 +39,7 @@ class Transformer(nn.Module):
             n_experts=n_experts,
             topk=topk,
             moe=moe
+            # moe=self.moe_ffn
         )
         # decoder 선언
         self.decoder = Decoder(
@@ -53,6 +55,7 @@ class Transformer(nn.Module):
             n_experts=n_experts,
             topk=topk,
             moe=moe
+            # moe=self.moe_ffn
         )
     
     def forward(self, batch):

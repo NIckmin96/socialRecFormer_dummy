@@ -10,7 +10,8 @@ class EncoderLayer(nn.Module):
     """
     def __init__(self, user_seq_len, item_seq_len, d_model, d_ffn, num_heads, n_experts, topk, dropout, moe):
         super(EncoderLayer, self).__init__()
-        self.moe = moe
+        # self.moe = moe # T/F
+        self.moe_ffn = moe # MoE/FFN 모듈 자체를 받음
 
         # self.self_norm = nn.BatchNorm1d(user_seq_len)
         self.self_norm = nn.LayerNorm(d_model)
@@ -56,10 +57,12 @@ class EncoderLayer(nn.Module):
         # 2-1. MoE/FFN
         residual = x
         x = self.norm_moe2(x)
-        if self.moe:
-            x = self.moe2(x)
-        else:
-            x = self.ffn2(x)
+        # if self.moe:
+        #     x = self.moe2(x)
+        # else:
+        #     x = self.ffn2(x)
+            
+        x = self.moe_ffn(x)
         
         # Add & Norm
         x = self.dropout_moe2(x)

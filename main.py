@@ -170,6 +170,7 @@ def train_encoder(model, optimizer, lr_scheduler, ds_iter, training_config):
             lr_scheduler.step(valid_rmse)
         else:
             lr_scheduler.step()
+            print(lr_scheduler.get_lr())
             
         print(f"Epoch {epoch:03d} || Encoder Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} ||\n")
         if update_cnt==30: 
@@ -180,29 +181,33 @@ def valid_encoder(model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt)
     model.eval()
     
     metrics = Metrics()
-    total_rmse, total_mae = 0.0, 0.0
-    
+    total_rmse = 0.0
+    preds, targets, masks = [],[],[]
     with torch.no_grad():
         dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(dec_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
             enc_output, global_preference = model.encoder(batch)
+            # 1~5 rescale
+            # global_preference*=5
             
             mask = (batch['item_rating'] != 0)
-            rmse = metrics.RMSE(global_preference, batch['item_rating'], mask).item()
-            mae = metrics.MAE(global_preference, batch['item_rating'], mask).item()
+            masks.append(mask)
+            preds.append(global_preference)
+            targets.append(batch['item_rating'])
             
-            total_rmse += rmse
-            total_mae += mae
+            rmse = metrics.RMSE(global_preference, batch['item_rating'], mask).item()
             eval_losses.update(rmse)
             
-    total_rmse /= (step+1)
-    total_mae /= (step+1)
+            
+    preds = torch.cat(preds, dim=0)
+    targets = torch.cat(targets, dim=0)
+    masks = torch.cat(masks, dim=0)
+    total_rmse = metrics.RMSE(preds, targets, masks)
             
     if total_rmse < best_rmse: 
         best_rmse = total_rmse
-        best_mae = total_mae
         torch.save({"model_state_dict":model.encoder.state_dict()}, checkpoint_path)
         print(f'\t best model saved: epoch = {epoch}, test RMSE = {total_rmse:.6f}')
         update_cnt = 0
@@ -243,7 +248,7 @@ def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
             output, global_preference = model(batch)
             
             main_mask = (batch['anchor_ratings'] != 0)
-            main_loss = metrics.RMSE(output, batch['anchor_ratings'], main_mask)
+            main_loss = metrics.MSE(output, batch['anchor_ratings'], main_mask)
             main_losses.update(main_loss.item())
 
             rank_logit = F.log_softmax(output, dim=-1).float()
@@ -302,6 +307,7 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     output_df = pd.DataFrame()
     total_rmse, total_mae = 0.0, 0.0
     model.eval()
+    preds, targets, masks = [],[],[]
     with torch.no_grad():
         
         dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
@@ -309,17 +315,16 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
             batch = {k:v.to(device) for k,v in batch.items()}
             
             output, global_preference = model(batch)
-            
-            # mask = (batch['item_rating'] != 0)
-            # rmse = metrics.RMSE(global_preference, batch['item_rating'], mask).item()
-            # mae = metrics.MAE(global_preference, batch['item_rating'], mask).item()
-            
             mask = (batch['anchor_ratings'] != 0)
-            rmse = metrics.RMSE(output, batch['anchor_ratings'], mask).item()
-            mae = metrics.MAE(output, batch['anchor_ratings'], mask).item()
+            # 1~5로 rescale
+            # output *= 5
             
-            total_rmse += rmse
-            total_mae += mae
+            masks.append(mask)
+            preds.append(output)
+            targets.append(batch['anchor_ratings'])
+            
+            rmse = metrics.RMSE(output, batch['anchor_ratings'], mask).item()
+            
             eval_losses.update(rmse)
             
             dec_iterator.set_description(
@@ -348,6 +353,10 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
             
             output_df = pd.concat([output_df, df])
             
+    preds = torch.cat(preds, dim=0)
+    targets = torch.cat(targets, dim=0)
+    masks = torch.cat(masks, dim=0)
+    total_rmse = metrics.RMSE(preds, targets, masks)
     output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
                                                           'anchor_ratings':lambda x:sum(x, start=[]),
                                                           'outputs':lambda x:sum(x, start=[])}).reset_index()
@@ -356,8 +365,6 @@ def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_n
     output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
     output_df = output_df.dropna(how='any')
     total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
-    total_rmse /= (step+1)
-    total_mae /= (step+1)
     
     # rmse_score = (-np.exp(-(best_rmse/total_rmse))+1)
     # base_score = (-np.exp(-1)+1)
@@ -402,6 +409,7 @@ def eval(model, ds_iter):
                     leave=False)
 
     total_rmse, total_mae = 0.0, 0.0
+    preds, targets, masks = [],[],[]
     output_df = pd.DataFrame()
     with torch.no_grad():
         for step, batch in enumerate(epoch_iterator):     
@@ -410,10 +418,10 @@ def eval(model, ds_iter):
             output, global_preference = model(batch)
             
             mask = (batch['anchor_ratings'] != 0)
+            masks.append(mask)
+            preds.append(output)
+            targets.append(batch['anchor_ratings'])
             rmse = metrics.RMSE(output, batch['anchor_ratings'], mask).item()
-            mae = metrics.MAE(output, batch['anchor_ratings'], mask)
-            total_rmse += rmse
-            total_mae += mae
             
             epoch_iterator.set_description(
                         "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
@@ -440,6 +448,11 @@ def eval(model, ds_iter):
                             'outputs':output_lst})
             
             output_df = pd.concat([output_df, df])
+    preds = torch.cat(preds, dim=0)
+    targets = torch.cat(targets, dim=0)
+    masks = torch.cat(masks, dim=0)
+    total_rmse = metrics.RMSE(preds, targets, masks)
+    total_mae = metrics.MAE(preds, targets, masks)
             
     output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x.tolist(), start=[]),
                                                         'anchor_ratings':lambda x:sum(x.tolist(), start=[]),
@@ -467,10 +480,7 @@ def eval(model, ds_iter):
     # non neg + item 개수별 filter o
     filtered = non_neg_df[non_neg_df['anchor_items'].apply(len)>=10].apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
     filtered_ndcg = filtered['ndcg@10'].mean()
-    filtered_precision = filtered['precision@10'].mean()
-    # filtered_recall = filtered['recall@10'].mean()
-    total_rmse /= (step+1)
-    total_mae /= (step+1)           
+    filtered_precision = filtered['precision@10'].mean()          
     
     neg_.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_neg.csv', index=False)
     non_neg.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_non_neg.csv', index=False)
@@ -531,7 +541,6 @@ def get_args():
     parser.add_argument('--neg', type=str2bool, default=False)
 
     # tuning
-    # parser.add_argument('--scheduler', type=str, default='rp')
     parser.add_argument('--enc_scheduler', type=str, default='rp')
     parser.add_argument('--dec_scheduler', type=str, default='rp')
     
@@ -573,10 +582,7 @@ def main():
     training_config = Config[args.dataset]["training"]
     # batch size update
     # training_config["batch_size"] = args.bs
-    if args.dataset=='ciao_timestamp':
-        test_bs = 1024
-    else:
-        test_bs = 128
+    test_bs = 1024
     
     # dataset & dataloader
     train_enc = EncoderDataset(total_train)
@@ -585,8 +591,8 @@ def main():
     test_ds = DecoderDataset(total_test)
     
     ds_iter = {
-            "train_enc":DataLoader(train_enc, batch_size = training_config['batch_size']*args.augs, shuffle=True, num_workers=4),
-            "train":DataLoader(train_ds, batch_size = training_config['batch_size'], shuffle=True, num_workers=4),
+            "train_enc":DataLoader(train_enc, batch_size = training_config['bs_enc'], shuffle=True, num_workers=4),
+            "train":DataLoader(train_ds, batch_size = training_config['bs_dec'], shuffle=True, num_workers=4),
             "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
             "test":DataLoader(test_ds, batch_size = test_bs, shuffle=False, num_workers=1)
     }
@@ -635,12 +641,21 @@ def main():
         os.makedirs(checkpoint_dir)
     
     name_moe = 'moe' if model_config['moe'] else 'ffn'
-    name = ('_').join([str(v) for k,v in model_config.items()]+[str(v) for k,v in training_config.items()]+[name_moe])
+    if model_config['moe']:
+        name = ('_').join([str(v) for k,v in model_config.items() if k not in ['min_item_len','max_user_degree','max_item_degree']])
+        name_enc = ('_').join([str(v) for k,v in model_config.items() if k not in ['min_item_len','max_user_degree','max_item_degree','dec_blocks']])
+    else:
+        name = ('_').join([str(v) for k,v in model_config.items() if k not in ['n_experts','topk','moe','min_item_len','max_user_degree','max_item_degree']])
+        name_enc = ('_').join([str(v) for k,v in model_config.items() if k not in ['n_experts','topk','moe','min_item_len','max_user_degree','max_item_degree','dec_blocks']])
+                          
+    name = name+'_'+('_').join([str(v) for k,v in training_config.items()]+[name_moe])
+    name_enc = name_enc+'_'+('_').join([str(v) for k,v in training_config.items() if k not in ['weight_decay_dec','lr', 'bs_dec']]+[name_moe])
+    
     # name = '_'.join(model_confi/g.values())
     # name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler, name_moe])
     # enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler, name_moe])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}_{args.dec_scheduler}.model') # set model name
-    checkpoint_enc = os.path.join(checkpoint_dir, f'{name}_{args.enc_scheduler}_enc.model') # set model name
+    checkpoint_enc = os.path.join(checkpoint_dir, f'{name_enc}_{args.enc_scheduler}.model') # set model name
     print(checkpoint_path, "\n")
     print(checkpoint_enc, "\n")
     training_config["checkpoint_path"] = checkpoint_path
@@ -689,7 +704,7 @@ def main():
             optimizer = optimizer,
             mode = 'min',
             factor = 0.9,
-            patience = 4,
+            patience = 2,
             min_lr=1e-5,
             threshold = 1e-3,
             verbose = True
@@ -697,12 +712,12 @@ def main():
         else:
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=10,
+            first_cycle_steps=20,
             cycle_mult=1,
             max_lr = training_config['lr_enc'],
-            min_lr=1e-3,
+            min_lr=1e-4,
             warmup_steps=5,
-            gamma=0.9,
+            gamma=0.8,
             )
         
         if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
@@ -749,11 +764,11 @@ def main():
             # )
             lr_scheduler = CosineAnnealingWarmupRestarts(
             optimizer=optimizer,
-            first_cycle_steps=10,
+            first_cycle_steps=20,
             cycle_mult=1,
             max_lr = training_config['lr'],
-            min_lr=1e-3,
-            warmup_steps=2,
+            min_lr=1e-4,
+            warmup_steps=4,
             gamma=0.9,
             )
         
@@ -776,6 +791,8 @@ def main():
             eval(model, ds_iter)
             _ = model(batch)
             torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
+    else:
+        print("No Best Model Found")
             
     print(model_config)
     training_config = {k:v for k,v in training_config.items() if k not in ['checkpoint_path', 'enc_checkpoint_path']}

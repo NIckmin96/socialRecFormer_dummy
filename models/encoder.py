@@ -3,6 +3,7 @@ import torch.nn as nn
 
 from models.blocks.encoder_layer import EncoderLayer
 from models.layers.encoding_modules import SocialNodeEncoder, SpatialEncoder
+from models.layers.feed_forward_network import FeedForwardNetwork, SparseMoE
 
 from model_utils import generate_attn_pad_mask
 
@@ -25,6 +26,11 @@ class Encoder(nn.Module):
             num_layers: number of encoder layers
         """
         super(Encoder, self).__init__()
+        
+        if moe:
+            moe_ffn = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
+        else:
+            moe_ffn = FeedForwardNetwork(d_model, d_ffn, dropout)
 
         self.user_embed = user_embed
         self.item_embed = item_embed
@@ -39,10 +45,11 @@ class Encoder(nn.Module):
                 n_experts = n_experts,
                 topk = topk,
                 dropout = dropout,
-                moe = moe
+                # moe = moe
+                moe = moe_ffn
             ) for _ in range(num_layers)]
         )
-        
+        # self.activation = nn.Sigmoid()
     
     def forward(self, batched_data):
         x = self.user_embed(batched_data['user_seq'], batched_data['user_degree'])
@@ -58,5 +65,7 @@ class Encoder(nn.Module):
         self.global_attention = attention
         # MF
         global_preference = torch.matmul(x, x_item.transpose(2,1))
+        # normalize
+        # global_preference = self.activation(global_preference)
         
         return x, global_preference

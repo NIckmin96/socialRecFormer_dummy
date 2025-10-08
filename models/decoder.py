@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.blocks.decoder_layer import DecoderLayer
-from models.layers.encoding_modules import SocialNodeEncoder, ItemNodeEncoder, RatingEncoder, RatingBias, RankBias
+from models.layers.feed_forward_network import FeedForwardNetwork, SparseMoE
 
 from model_utils import generate_attn_pad_mask
 
@@ -27,6 +27,11 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.user_embed = user_embed
         self.item_embed = item_embed
+        
+        if moe:
+            moe_ffn = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
+        else:
+            moe_ffn = FeedForwardNetwork(d_model, d_ffn, dropout)
 
         self.dec_layers = nn.ModuleList(
             [DecoderLayer(
@@ -38,13 +43,12 @@ class Decoder(nn.Module):
                 n_experts = n_experts,
                 topk = topk,
                 dropout = dropout,
-                moe = moe
+                # moe = moe
+                moe = moe_ffn
             ) for _ in range(num_layers)]
         )
-
-        # self.norm_user = nn.LayerNorm(d_model)
-        # self.norm_item = nn.LayerNorm(d_model)
-        # self.activation = nn.LeakyReLU()
+        
+        # self.activation = nn.Sigmoid()
     
     def forward(self, batched_data, enc_output):
         # Input Encoding: Node it encoding + degree encoding
@@ -67,6 +71,8 @@ class Decoder(nn.Module):
         # MF
         enc_output = enc_output[:,0,:].unsqueeze(1)
         output = torch.matmul(enc_output, x_item.transpose(2,1)).squeeze(1)
+        # normalize
+        # output = self.activation(output)
         
         # attention의 첫번째 column = user representation과 item representation의 MM
         # output = attention[:,:,0]

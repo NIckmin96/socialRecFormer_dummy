@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class FeedForwardNetwork(nn.Module):
-    def __init__(self, d_model, ffn_size, dropout=0.1):
+    def __init__(self, d_model, ffn_size, dropout):
         super(FeedForwardNetwork, self).__init__()
 
         self.layer1 = nn.Linear(d_model, ffn_size)
@@ -22,13 +22,17 @@ class FeedForwardNetwork(nn.Module):
         return x
     
 class TopkRouter(nn.Module): # non-differentiable index를 방지하기위해 weight 결합 과정 필요
-    def __init__(self, d_model, n_experts=8, topk=1):
+    def __init__(self, d_model, n_experts, topk, dropout):
         super().__init__()
         self.topk = topk
         self.gate = nn.Linear(d_model, n_experts)
     
     def forward(self,x):
         logits = self.gate(x) # bs x l x n_experts
+        # dev(gating logit에 noise추가)
+        # noise = torch.randn_like(logits)
+        # logits = logits+noise
+        
         topk_logits, topk_indices = logits.topk(self.topk, dim=-1) # bs x l x topk
         zeros = torch.full_like(logits, float('-inf'), device=logits.device) # bs x l x n_experts
         sparse_logits = zeros.scatter(-1, topk_indices, topk_logits) # bs x l x n_experts
@@ -37,11 +41,11 @@ class TopkRouter(nn.Module): # non-differentiable index를 방지하기위해 we
     
     
 class SparseMoE(nn.Module):
-    def __init__(self, d_model, ffn_size, n_experts=8, topk=1, dropout=0.1):
+    def __init__(self, d_model, ffn_size, n_experts, topk, dropout):
         super(SparseMoE, self).__init__()
         self.d_model = d_model
-        self.experts = nn.ModuleList([FeedForwardNetwork(d_model, ffn_size) for _ in range(n_experts)])
-        self.router = TopkRouter(d_model=d_model, n_experts=n_experts, topk=topk)
+        self.experts = nn.ModuleList([FeedForwardNetwork(d_model, ffn_size, dropout) for _ in range(n_experts)])
+        self.router = TopkRouter(d_model=d_model, n_experts=n_experts, topk=topk, dropout=dropout)
         
         
     def forward(self,x):
