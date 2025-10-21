@@ -651,9 +651,11 @@ def main():
     name = name+'_'+('_').join([str(v) for k,v in training_config.items()]+[name_moe])
     name_enc = name_enc+'_'+('_').join([str(v) for k,v in training_config.items() if k not in ['weight_decay_dec','lr', 'bs_dec']]+[name_moe])
     
+    print(name)
+    print(name_enc)
     # name = '_'.join(model_confi/g.values())
     # name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_n_dec, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr, args.dec_scheduler, name_moe])
-    # enc_name = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler, name_moe])
+    # name_enc = '_'.join([name_seed, name_bs, name_u_len, name_i_len, name_augs, name_n_heads, name_n_enc, name_d_model, name_d_ffn, name_experts, name_topk, name_dropout, name_lr_enc, args.enc_scheduler, name_moe])
     checkpoint_path = os.path.join(checkpoint_dir, f'{name}_{args.dec_scheduler}.model') # set model name
     checkpoint_enc = os.path.join(checkpoint_dir, f'{name_enc}_{args.enc_scheduler}.model') # set model name
     print(checkpoint_path, "\n")
