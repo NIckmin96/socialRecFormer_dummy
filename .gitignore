@@ -11,4 +11,7 @@ drawio/
 *.sh
 *.pkl
 *.npy
+*.pickle
+*.pdf
+*.csv
 training_log.txt
