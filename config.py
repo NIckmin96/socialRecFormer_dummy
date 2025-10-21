@@ -17,16 +17,7 @@ ciao_timestamp={
             "lr":1e-3,
             "num_epochs":300,
             "bs_enc":32,
-            "bs_dec":32,
-            # # RP
-            # "factor":0.9,
-            # "patience":2,
-            # "threshold":1e-3,
-            # # CS
-            # "first_cycle":10,
-            # "cycle_mult":1,
-            # "warmup":0.2,
-            # "gamma":0.9
+            "bs_dec":64
          },
      }
 
@@ -72,7 +63,7 @@ epinions={
             "lr":4e-3,
             "num_epochs":300,
             "bs_enc":32,
-            "bs_dec":32
+            "bs_dec":64
          },
      }
 
