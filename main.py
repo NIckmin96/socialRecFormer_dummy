@@ -683,7 +683,7 @@ def run(config, checkpoint_dir=None):
         lr_scheduler = (args.enc_scheduler, scheduler)
             
         # Encoder Train
-        if not os.path.isfile(training_config['enc_checkpoint_path']):
+        if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
             enc_rmse = train_encoder(device, model, opt_enc, lr_scheduler, ds_iter, training_config)
         # Encoder Load
         else:
