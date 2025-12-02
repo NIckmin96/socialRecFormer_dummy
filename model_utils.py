@@ -71,10 +71,19 @@ def generate_attn_pad_mask(seq_q, seq_k):
 
     # [batch_size, 1, len_k(=len_q)]
     # pad_attn_mask = seq_k.data.eq(0).unsqueeze(1)
-    pad_attn_mask = (seq_k.data != 0).unsqueeze(1)      # FIXME: 0인 곳을 False(0)으로 두어야 softmax 거칠 시 0이 나옴.
-
+    
+    # [ORG]
+    # pad_attn_mask = (seq_k.data != 0).unsqueeze(1).expand(batch_size, len_q, len_k)     # FIXME: 0인 곳을 False(0)으로 두어야 softmax 거칠 시 0이 나옴.
+    
+    # [DEV]
+    mask_a = (seq_q.data!=0).unsqueeze(2).expand(batch_size, len_q, len_k)
+    mask_b = (seq_k.data!=0).unsqueeze(1).expand(batch_size, len_q, len_k)
+    pad_attn_mask = (mask_a & mask_b)
+    
     # [batch_size, len_q, len_k]
-    return pad_attn_mask.expand(batch_size, len_q, len_k)
+    return pad_attn_mask
+    
+    
 
 def generate_attn_subsequent_mask(seq):
     """

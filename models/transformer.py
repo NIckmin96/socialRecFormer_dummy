@@ -1,40 +1,63 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from models.encoder import Encoder
 from models.decoder import Decoder
 
+from models.layers.encoding_modules import SocialNodeEncoder, ItemNodeEncoder
+
+
 class Transformer(nn.Module):
-    # def __init__(self, num_user, max_degree_user, num_item, max_degree_item, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec):
-    def __init__(self, num_user, max_degree_user, max_spd_value, num_item, max_degree_item, d_model, d_ffn, num_heads, dropout, num_layers_enc, num_layers_dec):
+    def __init__(self, user_seq_len, item_seq_len, min_item_len, num_user, max_user_degree, num_item, max_item_degree, d_model, d_ffn, num_heads, dropout, enc_blocks, dec_blocks, n_experts, topk, moe):
         super(Transformer, self).__init__()
 
-        self.encoder = Encoder(
-            num_user=num_user,
-            max_degree=max_degree_user,
-            max_spd_value=max_spd_value,
-            d_model=d_model,
-            d_ffn=d_ffn,
-            num_heads=num_heads,
-            dropout=dropout,
-            num_layers=num_layers_enc
+        # embedding table 선언
+        self.user_embed = SocialNodeEncoder(
+            num_nodes = num_user,
+            max_degree = max_user_degree,
+            d_model = d_model)
+        
+        self.item_embed = ItemNodeEncoder(
+            num_nodes = num_item,
+            max_degree = max_item_degree,
+            d_model = d_model
         )
-
-        self.decoder = Decoder(
-            num_item=num_item,
-            max_degree=max_degree_item,
+        
+        # encoder 선언
+        self.encoder = Encoder(
+            user_seq_len=user_seq_len,
+            item_seq_len=item_seq_len,
+            user_embed=self.user_embed,
+            item_embed=self.item_embed,
             d_model=d_model,
             d_ffn=d_ffn,
             num_heads=num_heads,
             dropout=dropout,
-            num_layers=num_layers_dec
+            num_layers=enc_blocks,
+            n_experts=n_experts,
+            topk=topk,
+            moe=moe
+        )
+        # decoder 선언
+        self.decoder = Decoder(
+            user_seq_len=user_seq_len,
+            item_seq_len=min_item_len, # anchor item 최대 길이
+            user_embed=self.user_embed,
+            item_embed=self.item_embed,
+            d_model=d_model,
+            d_ffn=d_ffn,
+            num_heads=num_heads,
+            dropout=dropout,
+            num_layers=dec_blocks,
+            n_experts=n_experts,
+            topk=topk,
+            moe=moe
         )
     
-    def forward(self, batched_data):
-        enc_output, enc_loss = self.encoder(batched_data)
-        # print(f"############### Enc end... {enc_output.shape} and {src_mask.shape} ###############")
-        output, dec_loss = self.decoder(batched_data, enc_output)
-
-        # [batch_size, seq_leng_item, seq_len_user]
-        # ==> [batch_size, seq_len_user, seq_len_item]
-        return output.permute(0, 2, 1), enc_loss ,dec_loss#(enc_loss + dec_loss) / 2
+    def forward(self, batch):
+        enc_output, global_preference = self.encoder(batch)
+        output = self.decoder(batch, enc_output)
+        
+        
+        return output, global_preference

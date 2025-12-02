@@ -13,87 +13,41 @@ class ScaledDotProductAttention(nn.Module):
         if is_enc:
             self.spd_param = nn.Parameter(torch.randn((30, 30), dtype=torch.float, requires_grad=True))
     
-    def forward(self, Q, K, V, mask=None, attn_bias=None, last_layer_flag=False, is_dec_layer=False):
+    def forward(self, Q, K, V, mask=None):
         # Input is 4-d tensor
-            # [batch_size, head, length, d_tensor]
-        batch_size, head, length, d_tensor = K.size()
+        d_tensor = K.size(-1)
 
         # 1. Compute similarity by Q.dot(K^T)
             # d_tensor = d_model // num_head
             # [batch_size, num_heads, seq_length, d_tensor] ==> [batch_size, num_heads, d_tensor, seq_length]
         K_T = K.transpose(2, 3)
-        score = torch.matmul(Q, K_T) / math.sqrt(d_tensor)
-            # ==> [batch_size, num_heads, seq_length, seq_length]
-        # print(f"////// After Q*KT: {score.shape}")
+        attention = torch.matmul(Q, K_T) / math.sqrt(d_tensor)
 
         # 2. Apply attention mask
         if mask is not None:
-
-            score = score.masked_fill(mask == 0, -10000) # mask의 값이 0인 위치에 해당하는 attention score값을 -10000으로 변경
-            
-
-        # 3. Apply attention bias (spatial encoding)
-        # TODO: add attention bias before softmax
-            # [batch_size, num_head, seq_length, seq_length]
-        loss = 0
-        if attn_bias is not None:
-            # score += attn_bias
-            if is_dec_layer:
-                #score *= attn_bias  # decoder cross-attention 연산 시엔 mul -> 상호작용 하지 않은 item은 제외
-                #loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*30*200)
-                #attn_bias = torch.where(attn_bias == 0, -1, 1)
-                attn_bias = torch.where(attn_bias == 0, -1, 1) # attn bias = rating(implicit)
-                loss = torch.mean(torch.abs((torch.sign(score.float()) - torch.sign(attn_bias.float())))) #/ (batch_size*head*30*200)
-                #loss = torch.mean(torch.abs((score.float() - attn_bias.float()))) / (batch_size*head*30*200)
-                #print(loss)
-                #loss = 0
-            else:
-                # score += attn_bias  # encoder self-attention 연산 시엔 add -> bias term 추가     
-                #score += self.spd_param
-                
-                attn_bias = torch.where(attn_bias == 0, 1.0, (1/(attn_bias)**2).double()) # attn_bias = spd(user distance)
-                loss = torch.sqrt(F.mse_loss(score.float(), attn_bias.float())) / (batch_size*head*length*length) # [TODO] MSE loss에 대해서 다시 sqrt를 취하고, element의 개수로 나눠서 loss를 계산하는게 맞는지?
-                
-                #loss = 0
-                #score += attn_bias
-
-        ### Decoder 마지막 layer에서 Q * K.T 한 결과를 output으로 출력
-        if last_layer_flag:
-            score = torch.mean(score, dim=1)
-            return score, loss
-        ###
+            attention_map = attention.masked_fill(mask == 0, -10000) # mask의 값이 0인 위치에 해당하는 attention score값을 -10000으로 변경
+        
+        # if last_layer_flag:
+        #     rating_pred = torch.mean(attention_map, dim=1)
 
         # 3. Pass score to softmax for making [0, 1] range.
-        score = torch.softmax(score, dim=-1)
-        # print("\n##### Q * K + masking 에 softmax 결과 #####")
-        # print(score[0][:][0][0].data)
-        # quit()
+        attention_map = torch.softmax(attention_map, dim=-1)
 
         # 4. Dot product with V
-            # [batch_size, num_heads, seq_length, d_tensor]
-        # print("\n##### 기존 V값 #####")
-        # print(V[0][:][0][0].data)
-        V = torch.matmul(score, V)
-        # print("\n##### softmax(QK)*V 결과 #####")
-        # print(V[0][:][0][0].data)
-        # quit()
-
-        # print(f"////// After (Q*KT)V: score {score.shape} V(return) {V.shape}")
-
-        # return V, score
-        return V, loss
+        V = torch.matmul(attention_map, V)
+        
+        return V, attention
 
 class MultiHeadAttention(nn.Module):
     """
     Perform multi-head attention
     """
-    def __init__(self, d_model, num_heads, last_layer_flag=False, is_dec_layer=False):
+    def __init__(self, d_model, num_heads, last_layer_flag=False):
         super(MultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
-        self.attention = ScaledDotProductAttention(not is_dec_layer)
+        self.attention = ScaledDotProductAttention()
         self.last_layer_flag = last_layer_flag
-        self.is_dec_layer = is_dec_layer
 
         # Input projection
         self.W_Q = nn.Linear(d_model, d_model)
@@ -102,8 +56,8 @@ class MultiHeadAttention(nn.Module):
 
         self.W_concat = nn.Linear(d_model, d_model)
 
-    def forward(self, Q, K, V, mask=None, attn_bias=None):
-        # print("Am I in Decoder???????", self.is_dec_layer)
+    def forward(self, Q, K, V, mask=None):
+        
         # 1. Dot produt with weight matrices
             # [batch_size, seq_length, d_model]
         Q, K, V = self.W_Q(Q), self.W_K(K), self.W_V(V)
@@ -117,28 +71,16 @@ class MultiHeadAttention(nn.Module):
             # [batch_size, len_q, len_k] ==> [batch_size, num_heads, len_q, len_k]
         if mask is not None:
             mask = mask.unsqueeze(1).repeat(1, self.num_heads, 1, 1)
-
-        ####### Decoder의 마지막 layer (cross-attn)는 rating prediction을 수행
-        if not self.last_layer_flag:
-            # 3. Perform scaled-dot product attention
-            # out, attn = self.attention(Q, K, V, mask, attn_bias)
-            out, loss = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer)
-        else:
-            # print(f"        Last Layer shapes : Q ({Q.shape})   K ({K.shape})   V ({V.shape})")
-            out, loss = self.attention(Q, K, V, mask, attn_bias, self.last_layer_flag, self.is_dec_layer)
-            return out, loss
-        #######
-
-        # print(f"$$$$$$$$$$$$$$ After MHA: out {out.shape}")
-
+            
+        out, attention = self.attention(Q, K, V, mask)
+        attention = torch.mean(attention, dim=1)
+        
         # 4. Concat and pass to linear layer
             # (batch_size, seq_length, d_model)
         out = self.concat(out)
         out = self.W_concat(out)
 
-        # print(f"$$$$$$$$$$$$$$ After MHA and concat: out {out.shape}")
-
-        return out, loss
+        return out, attention
     
     def split(self, tensor):
         """

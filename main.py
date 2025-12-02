@@ -1,30 +1,38 @@
 import os
-import sys
+import gc
 import logging
 import argparse
 import random
-import math
-import json
+import datetime
+import pickle
 import time
-import itertools
 import pynvml
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
+from pathlib import Path
+
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.tensorboard import SummaryWriter
 
 import data_making_2 as dm
-from utils import redirect_stdout
+from utils import *
 from config import Config
-from dataset import MyDataset
+from dataset import EncoderDataset, DecoderDataset, MyDataset
 from models.transformer import Transformer
 from scheduler import WarmupCosineSchedule
-import requests
+
+# hyperparmeter tuning
+import ray
+from ray import tune
+from ray.air import session
+# from ray.tune import CLIReporter
+# from ray.tune.schedulers import ASHAScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -49,402 +57,506 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-# def MaskedMSELoss(target, prediction):
-#     """
-#     Compute Masked MSELoss
-#     """
-#     mask = (target != 0).float()
-#     squared_diff = (prediction - target)**2 * mask
-#     loss = torch.sum(squared_diff) / torch.sum(mask)
-
-#     return loss
-
-def valid(model, ds_iter, epoch, checkpoint_path, global_step, best_dev_rmse, best_dev_mae, init_t, update_cnt):
-    # val_rmse = []
-    # val_mae = []
-    criterion = nn.MSELoss()
-    eval_losses = AverageMeter()
+def train_encoder(device, model, optimizer, lr_scheduler, ds_iter, training_config):
+    # ######################### 학습 전, attention map 저장 #########################
+    tmp_batch = next(iter(ds_iter['train']))
+    tmp_batch = {k:v.to(device) for k,v in tmp_batch.items()}
     model.eval()
     with torch.no_grad():
-        # FIXME: valid를 기준으로 저장 X, test를 기준으로 바로 저장. 
-        epoch_iterator = tqdm(ds_iter['test'],
-                              desc="Validating (X / X Steps) (loss=X.X)",
-                              bar_format="{l_bar}{r_bar}",
-                              dynamic_ncols=True,
-                              leave=False)
-        pred, trg, msk = [], [], []
-        for step, batch in enumerate(epoch_iterator):
-            batch['user_seq'] = batch['user_seq'].to(device)
-            batch['user_degree'] = batch['user_degree'].to(device)
-            batch['item_list'] = batch['item_list'].to(device)
-            batch['item_degree'] = batch['item_degree'].to(device)
-            batch['item_rating'] = batch['item_rating'].to(device)
-            batch['spd_matrix'] = batch['spd_matrix'].to(device)
+        enc_output, global_preference = model.encoder(tmp_batch)
+        torch.save(model.encoder.global_attention.cpu(), 'soft_attn_b4.pt') # attention map 저장
+    # ############################################################################
 
-            outputs, enc_loss, dec_loss = model(batch)
+    # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
+    logger.info("***** Running Encoder training *****")
+    logger.info("Total steps = %d", len(ds_iter['train_enc']))
 
-            # loss = criterion(outputs.float(), batch['item_rating'].float())
-            # FIXME:
-                # 현재 target(batch['item_rating])은 0이 많이 포함되어 있는 sparse한 rating matrix로, shape가 [seq_len_user, seq_len_item] (batch dim 제외)
-                # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
-                # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
-                # 따라서 Masked MSELoss를 사용.
-                # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산.
+    best_rmse = 9999.0
+    best_mae = 9999.0
+
+    checkpoint_path = training_config['enc_checkpoint_path']
+    total_epochs = training_config["num_epochs"]
+    print(total_epochs)
+
+    update_cnt = 0
+    model.train()
+    metrics = Metrics()
+    # Training step
+    for epoch in range(total_epochs):
+    # for epoch in range(100):
+        sub_losses = AverageMeter()
+        # encoder 학습
+        enc_iterator = tqdm(ds_iter['train_enc'], desc="Encoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        for step, batch in enumerate(enc_iterator):
+            batch = {k:v.to(device) for k,v in batch.items()}
+            # forward pass
+            enc_output, global_preference = model.encoder(batch)
+
+            sub_mask = (batch['item_rating'] != 0)
+            sub_loss = metrics.RMSE(global_preference, batch['item_rating'], sub_mask)
+            sub_losses.update(sub_loss.item())
             
-            #print(batch['item_rating'].shape)
-            batch['item_rating'] = batch['item_rating'][:,0] 
-            #print(batch['item_rating'].shape)
-            outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            #print(outputs.shape)
+            nn.utils.clip_grad_value_(model.encoder.parameters(), clip_value=1) # Gradient Clipping
+            optimizer.zero_grad()            
+            sub_loss.backward()
+            optimizer.step()
+            enc_iterator.set_description(
+                        "Encoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(enc_iterator), sub_losses.avg))
+            
+            
+        valid_loss, best_rmse, valid_rmse, update_cnt = valid_encoder(device, model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt)
+        _type, scheduler = lr_scheduler
+        if _type=='rp':
+            scheduler.step(valid_rmse)
+        else:
+            scheduler.step()
+            print(scheduler.get_lr())
+            
+        print(f"Epoch {epoch:03d} || Encoder Loss: {sub_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} ||\n")
+        if update_cnt==30: 
+            break
+        
+    return best_rmse
+
+def valid_encoder(device, model, ds_iter, epoch, checkpoint_path, best_rmse, update_cnt):
+    eval_losses = AverageMeter()
+    model.eval()
+    
+    metrics = Metrics()
+    total_rmse = 0.0
+    preds, targets, masks = [],[],[]
+    with torch.no_grad():
+        # dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        dec_iterator = tqdm(ds_iter['test'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        for step, batch in enumerate(dec_iterator):     
+            batch = {k:v.to(device) for k,v in batch.items()}
+            
+            enc_output, global_preference = model.encoder(batch)
             
             mask = (batch['item_rating'] != 0)
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            loss = torch.sum(squared_diff) / torch.sum(mask)
-            #loss = criterion(outputs[mask].float(),batch['item_rating'][mask].float()).cuda()
-
-            loss += enc_loss
-            loss += dec_loss
+            masks.append(mask)
+            preds.append(global_preference)
+            targets.append(batch['item_rating'])
             
-            eval_losses.update(loss)
+            rmse = metrics.RMSE(global_preference, batch['item_rating'], mask).item()
+            eval_losses.update(rmse)
             
-            # 실제 rating matrix에서 0이 아닌 부분(실제 매긴 rating)과만 loss를 계산
-                # -> 현재 목표는 rating regression이기 때문이니까.
-            # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
-            eval_losses.update(loss)
-
-            # val_rmse.append(rmse)
-            # val_mae.append(mae)
             
-            pred.append(outputs)
-            trg.append(batch['item_rating'])
-            msk.append(mask)
-
-            epoch_iterator.set_description(
-                        "Validating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
-
-        # if total_rmse < best_dev_rmse:
-        #     best_dev_rmse = total_rmse
-        #     torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-        #     print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
+    preds = torch.cat(preds, dim=0)
+    targets = torch.cat(targets, dim=0)
+    masks = torch.cat(masks, dim=0)
+    total_rmse = metrics.RMSE(preds, targets, masks)
             
-        # if total_mae < best_dev_mae:
-        #     best_dev_mae = total_mae
-        #     torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-        #     print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
-        
-        pred = torch.cat(pred)
-        trg = torch.cat(trg)
-        msk = torch.cat(msk)
-        mse = F.mse_loss(pred[msk].float(), trg[msk].float(), reduction='none')
-        total_rmse = torch.sqrt(mse.mean())
-        total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
-        rmse = torch.sqrt(torch.mean(torch.pow((pred[msk].float() - trg[msk].float()), 2)))
+    if total_rmse < best_rmse: 
+        best_rmse = total_rmse
+        torch.save({"model_state_dict":model.encoder.state_dict()}, checkpoint_path)
+        print(f'\t best model saved: epoch = {epoch}, test RMSE = {total_rmse:.6f}')
+        update_cnt = 0
+    else:
+        update_cnt += 1
 
-        # baseline의 metric보다 낮은 경우
-        if (torch.mean(total_rmse, dim=0).item()<baseline_rmse) & (torch.mean(total_mae, dim=0).item()<baseline_mae):
-            # best보다 낮은 경우
-            if (total_rmse+total_mae < best_dev_rmse+best_dev_mae): 
-                best_dev_rmse = total_rmse
-                best_dev_mae = total_mae
-                torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-                print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
-                update_cnt = 0
-            # best보다 높지만, best가 baseline보다 높은 경우 update
-            elif (torch.mean(best_dev_rmse, dim=0).item()>baseline_rmse) | (torch.mean(best_dev_mae, dim=0).item()>baseline_mae): 
-                best_dev_rmse = total_rmse
-                best_dev_mae = total_mae
-                torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-                print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
-                update_cnt = 0
-            else:
-                update_cnt += 1
+    return eval_losses.avg, best_rmse, total_rmse, update_cnt
 
-        # baseline보다 높지만, best보다 낮은 경우
-        elif total_rmse+total_mae < best_dev_rmse+best_dev_mae:
-            best_dev_rmse = total_rmse
-            best_dev_mae = total_mae
-            torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
-            print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse.item():.6f}, test MAE = {total_mae.item():.6f}')
-            update_cnt = 0
-        else:
-            update_cnt += 1
-
-    return eval_losses.avg, best_dev_rmse, best_dev_mae, total_rmse, total_mae, update_cnt
-
-def train(model, optimizer, lr_scheduler, ds_iter, training_config, writer):
-    global baseline_rmse, baseline_mae
-# def train(model, optimizer, ds_iter, training_config, criterion):
+def train(device, model, optimizer, lr_scheduler, ds_iter, training_config):
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
     logger.info("***** Running training *****")
-    logger.info("  Total steps = %d", training_config["num_train_steps"])
-    
-    #losses = []
+    logger.info("  Total steps = %d", len(ds_iter['train']))
+
+    best_rmse = 9999.0
+    best_mae = 9999.0
+    best_ndcg = 0
+    best_model = None
 
     checkpoint_path = training_config['checkpoint_path']
-    best_dev_rmse = 9999.0
-    best_dev_mae = 9999.0
-    baseline_rmse = training_config['baseline_rmse']
-    baseline_mae = training_config['baseline_mae']
-
     total_epochs = training_config["num_epochs"]
 
     model.train()
     init_t = time.time()
     total_time = 0
     update_cnt = 0
-    criterion = nn.MSELoss()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
-
-    # Training step
-    for epoch in range(total_epochs):
-        lr_lst = []
-        losses = AverageMeter()
-        epoch_iterator = tqdm(ds_iter['train'],
-                            desc="Training (X / X Steps) (loss=X.X)",
-                            bar_format="{l_bar}{r_bar}",
-                            dynamic_ncols=True,
-                            leave=False)
         
-        for step, batch in enumerate(epoch_iterator):
-            # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-            batch['user_seq'] = batch['user_seq'].to(device)
-            batch['user_degree'] = batch['user_degree'].to(device)
-            batch['item_list'] = batch['item_list'].to(device)
-            batch['item_degree'] = batch['item_degree'].to(device)
-            batch['item_rating'] = batch['item_rating'].to(device)
-            batch['spd_matrix'] = batch['spd_matrix'].to(device)
-
+    lr_lst = []
+    metrics = Metrics()
+    for epoch in range(total_epochs):
+        losses = AverageMeter()
+        main_losses = AverageMeter()
+        rank_losses = AverageMeter()
+        # decoder 학습
+        dec_iterator = tqdm(ds_iter['train'], desc="Decoder (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        for step, batch in enumerate(dec_iterator):
+            batch = {k:v.to(device) for k,v in batch.items()}
             # forward pass
-            outputs, enc_loss, dec_loss = model(batch)
-
-            # compute loss
-            # FIXME: 
-                # 현재 target(batch['item_rating'])은 0이 많이 포함되어 있는 sparse한 rating matrix로, shape가 [seq_len_user, seq_len_item] (batch dim 제외)
-                # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
-                # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
-                # 따라서 Masked MSELoss를 사용
-                
-            # loss = criterion(outputs.float(), batch['item_rating'].float())
-
-
+            output, global_preference = model(batch)
             
-            ####### dec_loss
-            mask = (batch['item_rating'] != 0)
-            # abs_diff = torch.abs(outputs - batch['item_rating'])*mask
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            org_loss = torch.sum(squared_diff) / torch.sum(mask)
-            org_loss = torch.sqrt(org_loss) # RMSE
+            main_mask = (batch['anchor_ratings'] != 0)
+            main_loss = metrics.MSE(output, batch['anchor_ratings'], main_mask)
+            main_losses.update(main_loss.item())
 
-            ########## new_loss ?
+            rank_logit = F.log_softmax(output, dim=-1).float()
+            rank_target = F.softmax(batch['anchor_ratings'], dim=-1)
+            rank_loss = F.kl_div(rank_logit, rank_target, reduction='batchmean')
+            rank_losses.update(rank_loss.item())
             
-            #mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            #rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
-            #loss = criterion(outputs[mask].float(),batch['item_rating'][mask].float()).cuda()
-            #print(outputs.shape)
-            batch['item_rating'] = batch['item_rating'][:,0] 
-            outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            #print(outputs.shape)
+    
+            loss = main_loss + rank_loss
+            # loss = main_loss
+            losses.update(loss.item())
             
-            mask = (batch['item_rating'] != 0)
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            new_loss = torch.sum(squared_diff) / torch.sum(mask)
-
-            # loss =  org_loss + new_loss * training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"] 
-            loss = org_loss*training_config["alpha"] + dec_loss * training_config["gamma"] + enc_loss * training_config["beta"]
-
-            #loss = loss + spd_loss + new_loss
             
-            loss.backward()
-            
-            # print(loss)
-            # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-
             nn.utils.clip_grad_value_(model.parameters(), clip_value=1) # Gradient Clipping
+            optimizer.zero_grad()            
+            loss.backward()
             optimizer.step()
-            lr_scheduler.step()
-            lr_lst.append(lr_scheduler.get_last_lr())
-            #optimizer.zero_grad()
-
-            losses.update(loss)
-            epoch_iterator.set_description(
-                        "Training (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), losses.val))
+            dec_iterator.set_description(
+                        "Decoder Training (%d / %d Steps) (loss=%2.5f)" % (step, len(dec_iterator), losses.avg))
             
-        print(np.max(np.array(lr_lst)), np.min(np.array(lr_lst)), np.mean(np.array(lr_lst)))
-        # validation
-        end.record()
-        torch.cuda.synchronize()
-        total_time += (start.elapsed_time(end))
-        valid_loss, best_dev_rmse, best_dev_mae, valid_rmse, valid_mae, update_cnt = valid(model, ds_iter, epoch, checkpoint_path, step, best_dev_rmse, best_dev_mae, init_t, update_cnt)
-        model.train()
-        start.record()
+        # total_time += (start.elapsed_time(end))
+        valid_loss, best_rmse, best_ndcg, valid_ndcg, valid_rmse, update_cnt, best_model = valid(device, model, ds_iter, epoch, checkpoint_path, step, best_rmse, best_ndcg, update_cnt, best_model)
+        _type, scheduler = lr_scheduler
+        if _type=='rp':
+            scheduler.step(valid_rmse)
+        else:
+            scheduler.step()
+            print(scheduler.get_lr())
+            lr_lst.extend(scheduler.get_lr())
 
-        # Tensorboard recording
-        # writer.add_scalar('Loss/Train', losses.avg, epoch)
-        # writer.add_scalar('Loss/Valid', valid_loss, epoch)
-        #writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss, 'Org':org_losses.avg, 'SPD':spd_losses.avg, 'new':new_losses.avg}, epoch)
-        writer.add_scalars('Loss', {'Train':losses.avg, 'Valid':valid_loss,}, epoch)
-        writer.add_scalar('RMSE/Test', valid_rmse, epoch)
-        writer.add_scalar('MAE/Test', valid_mae, epoch)
-
-        print(f"Epoch {epoch:03d}: Train Loss: {losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch RMSE: {valid_rmse:.4f} || epoch MAE: {valid_mae:.4f} || best RMSE: {best_dev_rmse:.4f} || best MAE: {best_dev_mae:.4f}")
-        # if best_dev_mae < 0.81:
-        #     break
-        if epoch > 100:
+        print(f"Epoch {epoch:03d}: Main Loss: {main_losses.avg:.4f} || Rank Loss: {rank_losses.avg:.4f} || Test Loss: {valid_loss:.4f} || epoch NDCG@10: {valid_ndcg:.4f} || epoch RMSE: {valid_rmse:.4f} || best RMSE: {best_rmse:.4f} || best NDCG@10: {best_ndcg:.4f} ||\n")
+        if update_cnt > 30: 
             break
-        if update_cnt > 10:
-            break
-    writer.close()
 
     print('\n [Train Finished]')
     print("total training time (s): {}".format((time.time()-init_t)))
-    print("total training time (ms): {}".format(total_time))
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("total memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
     print(torch.cuda.memory_summary(device=device.index))
-
-
-def eval(model, ds_iter):
-
-    eval_losses = AverageMeter()
-    model.eval()
-
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
-    with torch.no_grad():
-        epoch_iterator = tqdm(ds_iter['test'],
-                        desc="Validating (X / X Steps) (loss=X.X)",
-                        bar_format="{l_bar}{r_bar}",
-                        dynamic_ncols=True,
-                        leave=False)
-        # for _, batch in ds_iter['test']:
-        pred, trg, msk = [], [], []
-        for step, batch in enumerate(epoch_iterator):
-            
-            # 모델의 입력은 batch 그 자체, batch는 Dict이며 따라서 Dict 안의 tensor들을 device로 load.
-            batch['user_seq'] = batch['user_seq'].to(device)
-            batch['user_degree'] = batch['user_degree'].to(device)
-            batch['item_list'] = batch['item_list'].to(device)
-            batch['item_degree'] = batch['item_degree'].to(device)
-            batch['item_rating'] = batch['item_rating'].to(device)
-            batch['spd_matrix'] = batch['spd_matrix'].to(device)
-            outputs, enc_loss, dec_loss = model(batch)
-
-            # loss = criterion(outputs.float(), batch['item_rating'].float())
-            # FIXME: 
-                # 현재 target(batch['item_rating'])은 0이 많이 포함되어 있는 sparse한 rating matrix로, shape가 [seq_len_user, seq_len_item] (batch dim 제외)
-                # model output 또한 마찬가지로 shape가 [seq_len_user, seq_len_item].
-                # 단순히 이 둘의 MSELoss를 계산하는 경우, known rating에 대한 제곱오차만을 계산하는 것이 아닌 unknown rating(0)에 대한 제곱오차도 계산하게 됨.
-                # 따라서 Masked MSELoss를 사용
-                # model의 출력에서 unknown rating에 대한 부분을 0으로 masking 처리, 제곱오차 계산 시 known rating과 만의 제곱오차를 계산하게 된다.
-            #print(batch['item_rating'].shape)
-            batch['item_rating'] = batch['item_rating'][:,0] 
-            outputs = outputs[:,0]
-            #outputs = torch.mean(outputs,dim=1)
-            
-            mask = (batch['item_rating'] != 0)
-            squared_diff = (outputs - batch['item_rating'])**2 * mask
-            loss = torch.sum(squared_diff) / torch.sum(mask)
-            loss += enc_loss
-            loss += dec_loss
-            
-            # eval_losses.update(loss.mean())
-            eval_losses.update(loss)
-            
-            # 실제 rating matrix에서 0이 아닌 부분(실제 매긴 rating)과만 loss를 계산
-                # -> 현재 목표는 rating regression이기 때문이니까.
-            # mse = F.mse_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='none')
-            # rmse = torch.sqrt(mse.mean())
-            # mae = F.l1_loss(outputs[mask].float(), batch['item_rating'][mask].float(), reduction='mean')
-            
-            # val_rmse.append(rmse)
-            # val_mae.append(mae)
-            
-            pred.append(outputs)
-            trg.append(batch['item_rating'])
-            msk.append(mask)
-
-            epoch_iterator.set_description(
-                        "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), eval_losses.val))
-
-        # total_rmse = sum(val_rmse) / len(val_rmse)
-        # total_mae = sum(val_mae) / len(val_mae)
         
-        pred = torch.cat(pred)
-        trg = torch.cat(trg)
-        msk = torch.cat(msk)
-        print(pred[msk])
-        print(trg[msk])
-        mse = F.mse_loss(pred[msk].float(), trg[msk].float(), reduction='none')
-        total_rmse = torch.sqrt(mse.mean())
-        total_mae = F.l1_loss(pred[msk].float(), trg[msk].float(), reduction='mean')
+    return best_model
+        
 
-    end.record()
-    torch.cuda.synchronize()
+def valid(device, model, ds_iter, epoch, checkpoint_path, global_step, best_rmse, best_ndcg, update_cnt, best_model):
+    eval_losses = AverageMeter()
+    metrics = Metrics()
+    output_df = pd.DataFrame()
+    total_rmse, total_mae = 0.0, 0.0
+    model.eval()
+    preds, targets, masks = [],[],[]
+    with torch.no_grad():
+        
+        # dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        dec_iterator = tqdm(ds_iter['test'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        for step, batch in enumerate(dec_iterator):     
+            batch = {k:v.to(device) for k,v in batch.items()}
+            
+            output, global_preference = model(batch)
+            mask = (batch['anchor_ratings'] != 0)
+            
+            masks.append(mask)
+            preds.append(output)
+            targets.append(batch['anchor_ratings'])
+            
+            rmse = metrics.RMSE(output, batch['anchor_ratings'], mask).item()
+            
+            eval_losses.update(rmse)
+            
+            dec_iterator.set_description(
+                        "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(dec_iterator), rmse))
+            
+            # zero padding인 경우 제외
+            mask = (batch['anchor_items']!=0)
+            output = output*mask
+            
+            item_lst, rating_lst, output_lst = [],[],[]
+            for i in range(batch['anchor_user'].size(0)):
+                mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
+                items = items = batch['anchor_items'][i][mask].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
+                outputs = output[i][mask].data.cpu().tolist()
+                assert len(items)==len(ratings)==len(outputs)
+                item_lst.append(items)
+                rating_lst.append(ratings)
+                output_lst.append(outputs)
+            anchor_users = batch['anchor_user'].data.cpu().tolist()
+            
+            df = pd.DataFrame({'anchor_user':anchor_users,
+                               'anchor_items':item_lst,
+                               'anchor_ratings':rating_lst,
+                               'outputs':output_lst})
+            
+            output_df = pd.concat([output_df, df])
+            
+    preds = torch.cat(preds, dim=0)
+    targets = torch.cat(targets, dim=0)
+    masks = torch.cat(masks, dim=0)
+    total_rmse = metrics.RMSE(preds, targets, masks)
+    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x, start=[]),
+                                                          'anchor_ratings':lambda x:sum(x, start=[]),
+                                                          'outputs':lambda x:sum(x, start=[])}).reset_index()
+    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))
+    output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
+    output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
+    output_df = output_df.dropna(how='any')
+    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    
+     # 상대 개선 비율 계산
+    ndcg_ratio = total_ndcg / best_ndcg if best_ndcg > 0 else 1.0
+    rmse_ratio = best_rmse / total_rmse if total_rmse > 0 else 1.0
+
+    # 조건 비교 (score 없이)
+    improved = (0.2 * ndcg_ratio + 0.8 * rmse_ratio) > 1.0
+    
+    if improved:
+        best_ndcg = total_ndcg
+        best_rmse = total_rmse
+        best_model = model.state_dict()
+        torch.save({"model_state_dict":best_model}, checkpoint_path)
+        print(f'\t best model saved: step = {global_step}, epoch = {epoch}, test RMSE = {total_rmse:.6f}, test NDCG@10 = {best_ndcg:.6f}')
+        update_cnt = 0
+    else:
+        update_cnt += 1
+
+    return eval_losses.avg, best_rmse, best_ndcg, total_ndcg, total_rmse, update_cnt, best_model
+    
+def eval(device, model, ds_iter):
+    model.eval()
+    metrics = Metrics()
+    # if device.type=='cuda':
+    #     start = torch.cuda.Event(enable_timing=True)
+    #     end = torch.cuda.Event(enable_timing=True)
+    #     stream = torch.cuda.current_stream(device=device)
+    #     start.record(stream)
+        
+    epoch_iterator = tqdm(ds_iter['test'],
+                    desc="Validating (X / X Steps) (loss=X.X)",
+                    ascii=" =",
+                    bar_format="{l_bar}{r_bar}",
+                    dynamic_ncols=True,
+                    leave=False)
+
+    total_rmse, total_mae = 0.0, 0.0
+    preds, targets, masks = [],[],[]
+    output_df = pd.DataFrame()
+    with torch.no_grad():
+        for step, batch in enumerate(epoch_iterator):     
+            batch = {k:v.to(device) for k,v in batch.items()}
+            
+            output, global_preference = model(batch)
+            
+            mask = (batch['anchor_ratings'] != 0)
+            masks.append(mask)
+            preds.append(output)
+            targets.append(batch['anchor_ratings'])
+            rmse = metrics.RMSE(output, batch['anchor_ratings'], mask).item()
+            
+            epoch_iterator.set_description(
+                        "Evaluating (%d / %d Steps) (loss=%2.5f)" % (step, len(epoch_iterator), rmse))
+            
+            # zero padding인 경우 제외
+            mask = (batch['anchor_items']!=0)
+            
+            item_lst, rating_lst, output_lst = [],[],[]
+            for i in range(batch['anchor_user'].size(0)): # batch내에서 user별 iteration
+                mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
+                items = batch['anchor_items'][i][mask].data.cpu().tolist()
+                ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
+                outputs = output[i][mask].data.cpu().tolist()
+                assert len(items)==len(ratings)==len(outputs)
+                item_lst.append(items)
+                rating_lst.append(ratings)
+                output_lst.append(outputs)
+            anchor_users = batch['anchor_user'].data.cpu().tolist()
+            
+            df = pd.DataFrame({'anchor_user':anchor_users,
+                            'anchor_items':item_lst,
+                            'anchor_ratings':rating_lst,
+                            'outputs':output_lst})
+            
+            output_df = pd.concat([output_df, df])
+    preds = torch.cat(preds, dim=0)
+    targets = torch.cat(targets, dim=0)
+    masks = torch.cat(masks, dim=0)
+    total_rmse = metrics.RMSE(preds, targets, masks)
+    total_mae = metrics.MAE(preds, targets, masks)
+            
+    output_df = output_df.groupby('anchor_user').agg({'anchor_items':lambda x:sum(x.tolist(), start=[]),
+                                                        'anchor_ratings':lambda x:sum(x.tolist(), start=[]),
+                                                        'outputs':lambda x:sum(x.tolist(), start=[])}).reset_index()
+    non_neg_df = output_df.apply(lambda x:filter_negs(x), axis=1)
+    
+    output_df['logits'] = output_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    
+    non_neg_df['logits'] = non_neg_df['outputs'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # non_neg_df['targets'] = non_neg_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1).tolist())
+    # negative sampling 포함
+    neg_ = output_df.apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    neg_ = neg_.dropna(how='any')
+    neg_ndcg = neg_['ndcg@10'].mean()
+    neg_precision = neg_['precision@10'].mean()
+    # neg_recall = neg_['recall@10'].mean()
+    neg_hr = neg_['hr@10'].mean()
+    # negative sampling 미포함 + item 개수별 filter x
+    non_neg = non_neg_df.apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    non_neg = non_neg.dropna(how='any')
+    non_neg_ndcg = non_neg['ndcg@10'].mean()
+    non_neg_precision = non_neg['precision@10'].mean()
+    # non_neg_recall = non_neg['recall@10'].mean()
+    # non neg + item 개수별 filter o
+    filtered = non_neg_df[non_neg_df['anchor_items'].apply(len)>=10].apply(lambda x:metrics.rank_metrics(x, 10), axis=1)
+    filtered_ndcg = filtered['ndcg@10'].mean()
+    filtered_precision = filtered['precision@10'].mean()          
+    
+    # neg_.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_neg.csv', index=False)
+    # non_neg.to_csv(f'eval_output_{args.dataset}_{args.item_per_user}_non_neg.csv', index=False)
+        
+    # if device.type=='cuda':
+    #     end.record(stream)
+    #     torch.cuda.synchronize()
 
     print("\n [Evaluation Results]")
-    print("Loss: %2.5f" % eval_losses.avg)
     print("RMSE: %2.5f" % total_rmse)
     print("MAE: %2.5f" % total_mae)
-    print(f"total eval time: {(start.elapsed_time(end))}")
+    print("################################")
+    print("NEG NDCG@10: %2.5f" % neg_ndcg)
+    print("NEG PRECISION@10: %2.5f" % neg_precision)
+    print("NEG HR@10: %2.5f" % neg_hr)
+    print("################################")
     print("peak memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.peak']>>20))
     print("all memory usage (MB): {}".format(torch.cuda.memory_stats()['active_bytes.all.allocated']>>20))
-
     
+    tuning_score = ((1/total_rmse)*neg_ndcg)**0.5
+    return tuning_score, total_rmse, neg_ndcg
+    
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def get_args():
+                
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
-    parser.add_argument("--mode", type = str, default="train",
-                        help="train eval")
-    parser.add_argument("--checkpoint", type = str, default="test",
-                        help="load ./checkpoints/model_name.model to evaluation")
+    parser.add_argument("--encoder", type=str2bool, default=False)
+    parser.add_argument("--decoder", type=str2bool, default=True)
+    parser.add_argument("--moe", type=str2bool, default=True)
+    parser.add_argument("--device", type=str, default='single')
+    parser.add_argument("--id", type=int, default=0)
+    parser.add_argument("--eval", type = str2bool, default=False)
+    parser.add_argument("--tune", type = str2bool, default=False)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--name', type=str, help="checkpoint model name")
-    parser.add_argument('--num_layers_enc', type=int, default=4, help="num enc layers")
-    parser.add_argument('--num_layers_dec', type=int, default=4, help="num dec layers")
-    parser.add_argument('--lr', type=float, default=1e-4)
     # dataset args
-    parser.add_argument("--dataset", type = str, default="epinions", help = "ciao, epinions")
-    parser.add_argument('--data_seed', type=int, default=42)
-    parser.add_argument("--test_ratio", type=float, default=0.1, help="percentage of valid/test dataset")
+    parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
+    parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
     parser.add_argument('--user_seq_len', type=int, default=30, help="user random walk sequence length")
-    parser.add_argument('--item_seq_len', type=int, default=100, help="item list length")
-    parser.add_argument('--return_params', type=int, default=1, help="return param value for generating random sequence")
-    parser.add_argument('--train_augs', type=int, default=10, help="how many times augment train data per anchor user")    
-    parser.add_argument('--test_augs', type=bool, default=False, help="Whether augment test data set in proportion to train_augs or not / max = 3")    
-    parser.add_argument('--regenerate', type=bool, default=False, help="Whether regenerate dataframe(random walk & total df) or not")    
+    parser.add_argument('--item_per_user', type=int, default=5, help="number of items per user")
+    parser.add_argument('--augs', type=int, default=1, help="how many times augment train data per anchor user")
+    parser.add_argument('--regen', type=str, default='no', help="[no, all, rw, total, train]")    
+    parser.add_argument('--bs', type=int, default=32, help="Batch size of dataloader")
+    parser.add_argument('--neg', type=str2bool, default=False)
+
+    # tuning
+    parser.add_argument('--enc_scheduler', type=str, default='rp')
+    parser.add_argument('--dec_scheduler', type=str, default='rp')
     
     args = parser.parse_args()
     return args
 
-def main():
-    global device
-
-    args = get_args()
-
-    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-                        datefmt='%m/%d/%Y %H:%M:%S',
-                        level=logging.INFO)
+def args_to_dict(args):
+    """argparse.Namespace를 직렬화 가능한 딕셔너리로 변환"""
+    return {
+        'encoder': args.encoder,
+        'moe': args.moe,
+        'device': args.device,
+        'id': args.id,
+        'eval': args.eval,
+        'seed': args.seed,
+        'dataset': args.dataset,
+        'test_ratio': args.test_ratio,
+        'user_seq_len': args.user_seq_len,
+        'item_per_user': args.item_per_user,
+        'augs': args.augs,
+        'regen': args.regen,
+        'bs': args.bs,
+        'neg': args.neg,
+        'enc_scheduler': args.enc_scheduler,
+        'dec_scheduler': args.dec_scheduler,
+    }
     
-    ### get model config ###
-    model_config = Config[args.dataset]["model"]
-    training_config = Config[args.dataset]["training"]
-
-    training_config["learning_rate"] = args.lr
-    # model expansion (1) : Increase # of Encoder/Decoder Blocks
-    model_config["num_layers_enc"] = int(math.log(args.train_augs+1)*args.num_layers_enc)
-    model_config["num_layers_dec"] = int(math.log(args.train_augs+1)*args.num_layers_dec)
+def run(config, checkpoint_dir=None):
+    import torch, random, numpy as np # 함수 내부에서 import 해줘야 함
+    
+    os.chdir(Path(__file__).parent.resolve())
+    if 'args_dict' in config:
+        args = argparse.Namespace(**config['args_dict'])
+    else:
+        args = argparse.Namespace(**config)
+    
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    # regen 여부 확인
+    if args.regen == 'all':
+        print("Re-Creating All Datatset...")
+    elif args.regen=='total':
+        print("Re-Creating total_df...")
+    elif args.regen=='rw':
+        print("Re-Creating rw_seq & total_df...")
+    else:
+        print("Loading Datatset...")
+    data_making = dm.DatasetMaking(args) 
+    print("\n")
+    
+    total_train = data_making.total_train
+    total_valid = data_making.total_valid
+    total_test = data_making.total_test
+    
+    min_item_len = data_making.min_item_len
+    
+    # dataset & dataloader
+    train_enc = EncoderDataset(total_train)
+    train_ds = DecoderDataset(total_train)
+    valid_ds = DecoderDataset(total_valid)
+    test_ds = DecoderDataset(total_test)
+    
+    model_config = Config[args.dataset]["model"].copy()
+    training_config = Config[args.dataset]["training"].copy()   
+    
+    if config!=None:
+        for k,v in config.items():
+            if k=='args_dict':
+                continue
+            elif k in model_config:
+                model_config[k]=v
+            elif k in training_config:
+                training_config[k]=v 
+                
+    # model config - num users & num items & degrees
+    model_config["num_user"] = data_making.num_user
+    model_config["num_item"] = data_making.num_item
+    model_config['min_item_len'] = min_item_len
+    model_config['user_seq_len'] = args.user_seq_len
+    model_config['item_seq_len'] = args.user_seq_len*args.item_per_user
+    model_config["max_user_degree"] = data_making.max_user_degree
+    model_config["max_item_degree"] = data_making.max_item_degree
+    model_config['moe'] = str2bool(args.moe)
+    
+    test_bs = 1024
+    ds_iter = {
+            "train_enc":DataLoader(train_enc, batch_size = training_config['bs_enc'], shuffle=True, num_workers=4),
+            "train":DataLoader(train_ds, batch_size = training_config['bs_dec'], shuffle=True, num_workers=4),
+            "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
+            "test":DataLoader(test_ds, batch_size = test_bs, shuffle=False, num_workers=1)
+    }
+    
+    ######################################################### model initialization #########################################################
 
     ### log preparation ###
     log_dir = os.getcwd() + f'/logs/log_seed_{args.seed}/'
@@ -454,20 +566,6 @@ def main():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    ###  set the random seeds for deterministic results. ####
-    SEED = args.seed
-    #SEED = 42
-    random.seed(SEED)
-    torch.manual_seed(SEED)
-    torch.backends.cudnn.deterministic = True
-
-
-    ### model preparation ###    # [batch_size, 1, len_k(=len_q)]
-
-    print(model_config)
-    model = Transformer(**model_config)
-
-    # checkpoint_dir = os.getcwd() + f'/checkpoints/{args.dataset}/checkpoints_seed_{args.seed}/'
     checkpoint_data = os.getcwd() + f'/checkpoints/{args.dataset}/'
     if not os.path.exists(checkpoint_data):
         os.makedirs(checkpoint_data)
@@ -478,32 +576,32 @@ def main():
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
     
-    name_dataset = str(args.dataset)
-    name_seed = str(args.data_seed)
-    name_u_len = str(args.user_seq_len)
-    name_i_len = str(args.item_seq_len)
-    name_n_enc = str(model_config['num_layers_enc'])
-    name_n_dec = str(model_config['num_layers_dec'])
-    name_train_augs = str(args.train_augs)
-    name_test_augs = str(str(min(3,args.train_augs)) if args.test_augs else '')
-    args.name = '_'.join([name_dataset, name_seed, name_u_len, name_i_len, name_n_enc, name_n_dec, name_train_augs, name_test_augs])
-    checkpoint_path = os.path.join(checkpoint_dir, f'{args.name}.model') # set model name
+    name_moe = 'moe' if model_config['moe'] else 'ffn'
+    if model_config['moe']:
+        name = ('_').join([str(v) for k,v in model_config.items() if k not in ['moe']])
+        name_enc = ('_').join([str(v) for k,v in model_config.items() if k not in ['moe','dec_blocks']])
+    else:
+        name = ('_').join([str(v) for k,v in model_config.items() if k not in ['n_experts','topk','moe']])
+        name_enc = ('_').join([str(v) for k,v in model_config.items() if k not in ['n_experts','topk','moe','dec_blocks']])
+        
+    name = name+'_'+name_moe
+    name_enc = name_enc+'_'+name_moe
+                          
+    name = name+'_'+('_').join([str(v) for k,v in training_config.items()])
+    name_enc = name_enc+'_'+('_').join([str(v) for k,v in training_config.items() if k not in ['weight_decay_dec','lr', 'bs_dec']])
+    
+    print(model_config)
+    print(training_config)
+    checkpoint_path = os.path.join(checkpoint_dir, f'{name}_{args.dec_scheduler}.model') # set model name
+    checkpoint_enc = os.path.join(checkpoint_dir, f'{name_enc}_{args.enc_scheduler}.model') # set model name
     print(checkpoint_path, "\n")
+    print(checkpoint_enc, "\n")
     training_config["checkpoint_path"] = checkpoint_path
-    """if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print("model loaded from: " + checkpoint_path)"""
+    training_config["enc_checkpoint_path"] = checkpoint_enc
 
-
-    #model = model.cuda()
-    print(model)
-    # print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
-    # print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
-
-    device_ids = list(range(torch.cuda.device_count()))
-    # gpu device선택
+    # Device
     pynvml.nvmlInit()
+    device_ids = list(range(torch.cuda.device_count()))
     for i in device_ids:
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
         util_info = pynvml.nvmlDeviceGetUtilizationRates(handle)
@@ -511,149 +609,227 @@ def main():
             device = torch.device(f'cuda:{i}')
             break
         else:
-            device = 'cpu'
+            device = torch.device('cpu')
 
-    pynvml.nvmlShutdown()
-
-    if device=='cpu': 
-        raise DeviceError
-    
-    print(f"GPU index: {device.index}")
-    print("\n")
-    
-    model = model.to(device)
-    # model = model.cuda()
-
-    ######################################################### data preparation #########################################################
-
-    ### FIXME: 전체 데이터에 대해 파일 생성이 오래 걸림 (현재 시퀀스의 rating matrix 생성하는 부분이 문제로 보임)
-        ### FIXME: (231012) validation set을 통해 모델이 잘 train 되는것은 확인했으므로, 바로 test를 진행하면서 model을 저장.
-
-    '''
-    data_making_2.py에서는 한번에 train/valid/test를 만들고 있기 때문에, MyDataset 내에서 DatasetMaking 객체를 따로 불러오면 비효율적임
-    
-    1. 파일 있는지 확인(train/valid/test 전부)
-    2. 없으면 DatasetMaking 객체 생성
-    3. DatasetMaking 객체 내 train/valid/test -> dataset
-
-    regenerate 부분 추가하기
-    - regenerate==True시, 전체 데이터 처음부터 다시 생성하기
-
-    train data 생성시에, valid/test 데이터는 그대로 유지시키기
-    '''
-    # regenerate 여부 확인
-    if args.regenerate:
-        print("Re-Creating Datatset...")
-        if args.test_augs:
-            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
-        else:
-            print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}\n test_augs : {args.train_augs}")
-        data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)    
-
-    # 1. file path check(train_augs & test_augs)
-    train_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_train_{args.train_augs}times.pkl')
-    valid_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                              f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_valid.pkl')
-    if args.test_augs:
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test_{args.train_augs}times.pkl')
+    if args.device=='cpu':
+        device = torch.device(args.device)
     else:
-        test_path = os.path.join(os.getcwd(), 'dataset', args.dataset, 
-                                f'sequence_data_seed_{args.seed}_walk_{args.user_seq_len}_itemlen_{args.item_seq_len}_rp_{args.return_params}_test.pkl')
+        # device = torch.device(f'cuda:{args.id}' if torch.cuda.is_available() else 'cpu')
+        device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
     
-    print(f"dataset : {args.dataset}\n seed : {args.data_seed}\n test_ratio: {args.test_ratio}\n user_seq_len : {args.user_seq_len}\n item_seq_len : {args.item_seq_len}\n return_params : {args.return_params}\n train_augs : {args.train_augs}")
+    # print(f"GPU index: {device.index}")
+    print(f"GPU : {device}")
     print("\n")
-    data_making = dm.DatasetMaking(args.dataset, args.seed, args.user_seq_len, args.item_seq_len, args.return_params, args.train_augs, args.test_augs, args.regenerate)
-    total_train = data_making.total_train
-    total_valid = data_making.total_valid
-    total_test = data_making.total_test
+    pynvml.nvmlShutdown()
         
-    # print(total_train.shape)
-    # print(total_test.shape)
-    # print(total_valid.shape)
-
-        # del data_making # for memory capacity
+    ### model preparation ###
+    model = Transformer(**model_config).to(device)
+    if not args.eval:
+        # Encoder
+        opt_enc = torch.optim.AdamW(
+            model.encoder.parameters(),
+            lr = training_config['lr_enc'],
+            betas=[0.9,0.999],
+            weight_decay=training_config['weight_decay_enc'])
         
+        if args.enc_scheduler=='rp':
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer = opt_enc,
+            mode = 'min',
+            factor = 0.9,
+            patience = 3,
+            min_lr=1e-5,
+            threshold = 1e-3,
+            verbose = True
+            )
+        else:
+            scheduler = CosineAnnealingWarmupRestarts(
+            optimizer=opt_enc,
+            first_cycle_steps=5,
+            cycle_mult=2,
+            max_lr = training_config['lr_enc'],
+            min_lr=1e-5,
+            warmup_steps=1,
+            gamma=0.9,
+            )
+            
+        lr_scheduler = (args.enc_scheduler, scheduler)
+            
+        # Encoder Train
+        if not os.path.isfile(training_config['enc_checkpoint_path']) or args.encoder:
+            enc_rmse = train_encoder(device, model, opt_enc, lr_scheduler, ds_iter, training_config)
+        # Encoder Load
+        else:
+            print("Best Encoder model loaded!")
+        checkpoint = torch.load(training_config['enc_checkpoint_path'])
+        model.encoder.load_state_dict(checkpoint['model_state_dict'])
+        _, _, enc_rmse, _ = valid_encoder(device, model, ds_iter, 0, checkpoint_path, 0, 0)
+        
+        if args.decoder:
+            # Decoder
+            opt_dec = torch.optim.AdamW(
+                model.parameters(),
+                lr = training_config['lr'],
+                betas=[0.9,0.999],
+                weight_decay=training_config['weight_decay_dec'])
+                        
+            if args.dec_scheduler=='rp':
+                # decoder 초기 LR 재설정
+                for param_group in opt_dec.param_groups:
+                    param_group['lr'] = training_config['lr']
 
-    train_ds = MyDataset(total_train)
-    valid_ds = MyDataset(total_valid)
-    test_ds = MyDataset(total_test)
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer = opt_dec,
+                mode = 'min',
+                factor = 0.9,
+                patience = 3,
+                min_lr=1e-5,
+                threshold = 1e-3,
+                verbose = True
+                )
+            else:
+                scheduler = CosineAnnealingWarmupRestarts(
+                optimizer=opt_dec,
+                first_cycle_steps=300,
+                cycle_mult=1,
+                max_lr = training_config['lr'],
+                min_lr=1e-5,
+                warmup_steps=0,
+                gamma=1,
+                )
+                
+            lr_scheduler = (args.dec_scheduler, scheduler)
+            
+            # Decoder Train
+            best_model = train(device, model, opt_dec, lr_scheduler, ds_iter, training_config)
+            model.load_state_dict(best_model)
+            score, best_rmse, best_ndcg = eval(device, model, ds_iter)
+            
+            # 메모리 정리
+            del model, opt_enc, opt_dec
+            torch.cuda.empty_cache()
+            gc.collect()
+
+    else:
+        ### eval ###
+        checkpoint_path = training_config['checkpoint_path']
+        print(checkpoint_path)
+        if os.path.exists(checkpoint_path): #and checkpoint_path != os.getcwd() + '/checkpoints/test.model':
+            model.eval()
+            with torch.no_grad():
+                batch = next(iter(ds_iter['train']))
+                batch = {k:v.to(device) for k,v in batch.items()}
+                checkpoint = torch.load(checkpoint_path)
+                model.load_state_dict(checkpoint["model_state_dict"])
+                print("loading the best model from: " + checkpoint_path)
+                score, best_rmse, best_ndcg = eval(device, model, ds_iter)
+                _ = model(batch)
+                torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
+        else:
+            print("No Best Model Found")
+            
+        print(model_config)
+        training_config = {k:v for k,v in training_config.items() if k not in ['checkpoint_path', 'enc_checkpoint_path']}
+        print(training_config)
     
+    if args.tune:
+        if args.decoder:
+            session.report({
+                            'enc_rmse': enc_rmse.cpu().item(),
+                            'score': score.cpu().item(),
+                            'rmse': best_rmse.cpu().item(),
+                            'ndcg': best_ndcg.item()
+                            })
+        else:
+            session.report({
+                            'enc_rmse': enc_rmse.cpu().item()
+                            })
 
-    # train_ds = MyDataset(dataset=args.dataset, split='train', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params, train_augs=args.train_augs)
-    # test_ds = MyDataset(dataset=args.dataset, split='test', seed=args.data_seed, user_seq_len=args.user_seq_len, item_seq_len=args.item_seq_len, return_params=args.return_params)
+def main():
+    args = get_args()
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                        datefmt='%m/%d/%Y %H:%M:%S',
+                        level=logging.INFO)
+    args_dict = vars(args)
+    ######################################################### data preparation #########################################################    
+    if args.tune:
+        print("="*60)
+        print("Starting Ray Tune Hyperparameter Search")
+        print("="*60)
+        print(f"Fixed args: {args_dict}")
+        # args_dict = vars(args)
+        # print(type(args_dict))
+        # parameters to Tune
+        search_space = {
+            'args_dict': args_dict,
+            # 'user_seq_len':tune.choice([20,30,40]),
+            # 'item_per_user':tune.choice([2,3,4,5,6]),
+            # 'enc_blocks': tune.choice([1,2,3]),
+            # 'dec_blocks': tune.choice([1,2]),
+            'n_experts': tune.choice([2,3,4,5,6,7,8]),
+            'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
+            # 'num_heads': tune.choice([3,4,5,6,7]),
+            # 'd_model': tune.sample_from(lambda spec:spec.config['num_heads']*32),
+            'd_ffn': tune.sample_from(lambda _: random.choice(list(range(256, 513)))),
+            # 'dropout': tune.choice([0.1, 0.2, 0.3]),
+            # 'weight_decay_enc': tune.choice([5e-2, 6e-2, 7e-2, 8e-2]),
+            # 'lr_enc': tune.choice([4e-3, 5e-3]),
+            'weight_decay_dec': tune.choice([1e-1,9e-2,8e-2,7e-2,6e-2,5e-2,4e-2,3e-2,2e-2,1e-2]),
+            'lr': tune.choice([4e-3,3e-3,2e-3,1e-3,9e-4,8e-4,7e-4,6e-4,5e-4,4e-4,3e-4,2e-4,1e-4]),
+            # 'bs_enc ':tune.choice([32,128]),
+            'bs ':tune.choice([32,64,128,256])
+        }
+        
+        # ray 초기화 및 실행
+        if not ray.is_initialized():
+            ray.init(
+                num_cpus=24, num_gpus=4,
+                ignore_reinit_error=True)
+            
+        if args.decoder:
+            metric = 'score'
+            mode = 'max'
+        else:
+            metric = 'enc_rmse'
+            mode = 'min'
+            
+        part = 'full' if args.decoder else 'enc'
+        now = datetime.datetime.now()
+        now_str = now.strftime("%m%d_%H%M")
+        analysis = tune.run(run, config=search_space, num_samples=200,
+                        resources_per_trial={'cpu':4, 'gpu':1},
+                        raise_on_failed_trial=False, 
+                        checkpoint_freq=0,
+                        storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
+                        name=f'{args.dataset}_{part}_{now_str}',
+                        metric=metric, mode=mode
+                        )
+                    
+        best_trial = analysis.get_best_trial(metric, mode=mode)
+        print(f"\nBest trial: {best_trial.trial_id}")
+        print(f"Best config: {best_trial.config}")
+        print(f"Best score: {best_trial.last_result[metric]:.6f}")
+        if args.decoder:
+            print(f"Best RMSE: {best_trial.last_result['rmse']:.6f}")
+            print(f"Best NDCG: {best_trial.last_result['ndcg']:.6f}")
+        # used_config_file = os.path.join(best_trial.logdir, "used_config.json")
 
-    ds_iter = {
-            # "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=8),
-            "train":DataLoader(train_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
-            # "dev":DataLoader(dev_ds, batch_size = training_config["batch_size"], shuffle=True, num_workers=4),
-            # "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=8)
-            "test":DataLoader(test_ds, batch_size = training_config["batch_size"], shuffle=False, num_workers=4)
-    }
-
-    ### training preparation ###
-
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr = training_config["learning_rate"],
-        betas = (0.9, 0.999), eps = 1e-6, weight_decay = training_config["weight_decay"]
-    )
-
-    # total_steps는 cycle당 있는 step 수. 없다면 epoch와 steps_per_epoch를 전댈해야함.
-        # steps_per_epoch는 한 epoch에서의 전체 step 수: (total_number_of_train_samples / batch_size)
-    total_epochs = training_config["num_epochs"]
-    total_train_samples = len(train_ds)
-    # training_config["num_train_steps"] = math.ceil(total_train_samples / total_epochs) # why divisor = 'total_epochs' not 'batch_size'???
-    training_config["num_train_steps"] = len(ds_iter['train'])
+        sorted_trials = sorted(analysis.trials, 
+                               key=lambda t:t.last_result.get(metric, float('inf')),
+                               reverse=(mode=='max'))
+        
+        for t in sorted_trials:
+            print(f"Trial: {t.trial_id}")
+            print(f"{metric}: {t.last_result.get(metric)}")
+            if metric=='score':
+                print(f"NDCG: {t.last_result.get('rmse')}")
+                print(f"RMSE: {t.last_result.get('ndcg')}")
+            print(f"Config: {t.config}")
+            print(f"Path: {t.local_path}")
+            print("-" * 60)
     
-
-    
-    # lr_scheduler = WarmupCosineSchedule(optimizer, warmup_steps=training_config["warmup"], t_total=total_train_samples*total_epochs)
-    
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR( # [CHECK]
-        optimizer = optimizer,
-        max_lr = training_config["learning_rate"],
-        # pct_start = training_config["warmup"] / training_config["num_train_steps"], # 40/batch개수
-        pct_start = 0.15,
-        # anneal_strategy = training_config["lr_decay"],
-        anneal_strategy = 'cos',
-        epochs = training_config["num_epochs"],
-        # steps_per_epoch = 2 * len(ds_iter['train'])
-        steps_per_epoch = len(ds_iter['train'])
-    )
-
-    # criterion = nn.MSELoss()
-
-    ### TensorBoard writer preparation ###
-    writer = SummaryWriter(os.path.join(log_dir,f"{args.name}.tensorboard"))
-    ### train ###
-    if args.mode == 'train':
-        train(model, optimizer, lr_scheduler, ds_iter, training_config, writer)
-        # train(model, optimizer, ds_iter, training_config, criterion)
-
-    # Since train logging is done by TensorBoard, log only test result.
-    log_path = os.path.join(log_dir,'{}.{}.log'.format(args.mode, args.name))
-    redirect_stdout(open(log_path, 'w'))
-
-    print(json.dumps(args.__dict__, indent = 4))
-
-    print(json.dumps([model_config, training_config], indent = 4))
-
-    print(model)
-    #print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
-    #print(f"num_parameter: {np.sum([np.prod(weight.size()) for weight in model.parameters()])}", flush = True)
-
-    ### eval ###
-    print(checkpoint_path)
-    if os.path.exists(checkpoint_path): #and checkpoint_path != os.getcwd() + '/checkpoints/test.model':
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print("loading the best model from: " + checkpoint_path)
-        eval(model, ds_iter)
-
-    torch.cuda.empty_cache()
-
+    else:
+        run(config=args_dict)
 
 if __name__ == '__main__':
     main()

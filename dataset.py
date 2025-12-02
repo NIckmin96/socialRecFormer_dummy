@@ -7,19 +7,49 @@ from torch.utils.data import Dataset
 
 class MyDataset(Dataset):
     
-    def __init__(self, dataframe):
+    def __init__(self, total_df, total_df2):
+        # sequence
+        self.user_sequences = torch.tensor(total_df['user_sequences'].tolist(), dtype=torch.long)
+        self.user_degree = torch.tensor(total_df['user_degree'].tolist(), dtype=torch.long)
+        self.item_sequences = torch.tensor(total_df['item_sequences'].tolist(), dtype=torch.long)
+        self.item_degree = torch.tensor(total_df['item_degree'].tolist(), dtype=torch.long)
+        self.item_rating = torch.stack(total_df['item_rating'].tolist()).squeeze(1)
+        # anchor
+        self.anchor_user = torch.tensor(total_df2['anchor_user'].tolist(), dtype=torch.long)
+        self.anchor_degree = torch.tensor(total_df2['anchor_degree'].tolist(), dtype=torch.long)
+        self.anchor_items = torch.tensor(total_df2['anchor_items'].tolist(), dtype=torch.long)        
+        self.anchor_item_degree = torch.tensor(total_df2['anchor_item_degree'].tolist(), dtype=torch.long)
+        self.anchor_ratings = torch.stack(total_df2['anchor_ratings'].tolist()).squeeze(1)
+    
+    def __len__(self):
+        # 전체 {train/valid/test}.csv의 길이 (dataframe의 전체 row 갯수)
+        return len(self.anchor_user)
 
-        self.user_sequences = torch.tensor(dataframe['user_sequences'].tolist(), dtype=torch.long)
+    def __getitem__(self, index):
+        return {
+            # sequence
+            'user_seq': self.user_sequences[index],
+            'user_degree': self.user_degree[index],
+            'item_list': self.item_sequences[index],
+            'item_degree': self.item_degree[index],
+            'item_rating': self.item_rating[index],
+            # anchor
+            'anchor_user' : self.anchor_user[index],
+            'anchor_degree' : self.anchor_degree[index],
+            'anchor_items':self.anchor_items[index],
+            'anchor_item_degree':self.anchor_item_degree[index],
+            'anchor_ratings':self.anchor_ratings[index],
+        }
 
-        self.user_degree = torch.tensor(dataframe['user_degree'].tolist(), dtype=torch.long)
-
-        self.item_sequences = torch.tensor(dataframe['item_sequences'].tolist(), dtype=torch.long)
-
-        self.item_degree = torch.tensor(dataframe['item_degree'].tolist(), dtype=torch.long)
-
-        self.rating_matrix = dataframe['item_rating']
-        
-        self.spd_matrix = dataframe['spd_matrix']
+class EncoderDataset(Dataset):
+    
+    def __init__(self, total_df):        
+        # sequence
+        self.user_sequences = torch.tensor(total_df['user_sequences'].tolist(), dtype=torch.long)
+        self.user_degree = torch.tensor(total_df['user_degree'].tolist(), dtype=torch.long)
+        self.item_sequences = torch.tensor(total_df['item_sequences'].tolist(), dtype=torch.long)
+        self.item_degree = torch.tensor(total_df['item_degree'].tolist(), dtype=torch.long)
+        self.item_rating = torch.stack(total_df['item_rating'].tolist()).squeeze(1)
     
     def __len__(self):
         # 전체 {train/valid/test}.csv의 길이 (dataframe의 전체 row 갯수)
@@ -27,94 +57,46 @@ class MyDataset(Dataset):
 
     def __getitem__(self, index):
         return {
+            # sequence
             'user_seq': self.user_sequences[index],
             'user_degree': self.user_degree[index],
             'item_list': self.item_sequences[index],
             'item_degree': self.item_degree[index],
-            'item_rating': self.rating_matrix[index],
-            'spd_matrix': self.spd_matrix[index]
+            'item_rating': self.item_rating[index],
         }
         
-# import os
-# import pickle
-# import pandas as pd
-# import numpy as np
-# import torch
-# from torch.utils.data import Dataset
-
-# class MyDataset(Dataset):
-#     """
-#     Process & make dataset for DataLoader
-#     """
-#     def __init__(self, dataset:str, split:str, seed:int, user_seq_len:int=20, item_seq_len:int=250, return_params:int=1):
-#         """
-#         Args:
-#             dataset: raw dataset name (ciao // epinions)
-#             split: dataset split type (train // valid // test)
-#             seed: random seed used in dataset split
-#             item_seq_len: length of item list (processed in `data_utils.py`)
-#         """
-#         self.data_path = os.path.join(os.getcwd(), 'dataset', dataset)
-        
-#         # Load preprocessed .pkl file
-#         file_path = os.path.join(
-#             self.data_path, 
-#             f'sequence_data_seed_{seed}_walk_{user_seq_len}_itemlen_{item_seq_len}_rp_{return_params}_{split}.pkl'
-#         )
-#         dataframe = pd.read_pickle(file_path)
-#         print("dataset loaded")
-
-#         self.user_sequences = torch.tensor(dataframe['user_sequences'].tolist(), dtype=torch.long)
-
-#         self.user_degree = torch.tensor(dataframe['user_degree'].tolist(), dtype=torch.long)
-
-#         self.item_sequences = torch.tensor(dataframe['item_sequences'].tolist(), dtype=torch.long)
-
-#         self.item_degree = torch.tensor(dataframe['item_degree'].tolist(), dtype=torch.long)
-
-#         print("start")
-
-#         self.rating_matrix = dataframe['item_rating']
-        
-#         self.spd_matrix = dataframe['spd_matrix']
-
-#         print("end")
-
+class DecoderDataset(Dataset):
     
-#     def __len__(self):
-#         return len(self.user_sequences)
-
-#     def __getitem__(self, index):
-#         return {
-#             'user_seq': self.user_sequences[index],
-#             'user_degree': self.user_degree[index],
-#             'item_list': self.item_sequences[index],
-#             'item_degree': self.item_degree[index],
-#             'item_rating': self.rating_matrix[index],
-#             'spd_matrix': self.spd_matrix[index]
-#         }
+        # sequence
+    def __init__(self, total_df):
+        self.user_sequences = torch.tensor(total_df['user_sequences'].tolist(), dtype=torch.long)
+        self.user_degree = torch.tensor(total_df['user_degree'].tolist(), dtype=torch.long)
+        self.item_sequences = torch.tensor(total_df['item_sequences'].tolist(), dtype=torch.long)
+        self.item_degree = torch.tensor(total_df['item_degree'].tolist(), dtype=torch.long)
+        self.item_rating = torch.stack(total_df['item_rating'].tolist()).squeeze(1)
+        # anchor
+        self.anchor_user = torch.tensor(total_df['anchor_user'].tolist(), dtype=torch.long)
+        self.anchor_degree = torch.tensor(total_df['anchor_degree'].tolist(), dtype=torch.long)
+        self.anchor_items = torch.tensor(total_df['anchor_items'].tolist(), dtype=torch.long)        
+        self.anchor_item_degree = torch.tensor(total_df['anchor_item_degree'].tolist(), dtype=torch.long)
+        self.anchor_ratings = torch.stack(total_df['anchor_ratings'].tolist()).squeeze(1)
     
-# if __name__ == "__main__":
-#     dataset = 'ciao'
-#     split = 'train'
+    def __len__(self):
+        # 전체 {train/valid/test}.csv의 길이 (dataframe의 전체 row 갯수)
+        return len(self.anchor_user)
 
-#     dataset = MyDataset(dataset, split, seed=42, user_seq_len=30, item_seq_len=100)
-#     print("?")
-#     loader = DataLoader(dataset, batch_size=256, shuffle=True)
-#     print("?")
-#     for data in loader:
-#         # print(data['user_seq'].shape)
-#         # print(data['user_degree'].shape)
-#         # print(data['item_list'].shape)
-#         # print(data['item_degree'].shape)
-#         # print(data['item_rating'].shape)
-#         # print(data['spd_matrix'].shape)
-#         data['item_rating'] = data['item_rating'].view(-1)          # convert to 2D tensor
-#         print(torch.bincount(data['item_rating']))
-#         # print(data['user_seq'][0])
-#         # print(data['user_degree'][0])
-#         # print(data['item_list'][0])
-#         # print(data['item_degree'][0])
-#         # print(data['item_rating'][0])
-#         # print(data['spd_matrix'][0])
-#         quit()
+    def __getitem__(self, index):
+        return {
+            # sequence
+            'user_seq': self.user_sequences[index],
+            'user_degree': self.user_degree[index],
+            'item_list': self.item_sequences[index],
+            'item_degree': self.item_degree[index],
+            'item_rating': self.item_rating[index],
+            # anchor
+            'anchor_user' : self.anchor_user[index],
+            'anchor_degree' : self.anchor_degree[index],
+            'anchor_items':self.anchor_items[index],
+            'anchor_item_degree':self.anchor_item_degree[index],
+            'anchor_ratings':self.anchor_ratings[index],
+        }
