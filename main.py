@@ -797,16 +797,14 @@ def main():
             'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
             # 'num_heads': tune.choice([3,4,5,6,7]),
             # 'd_model': tune.sample_from(lambda spec:spec.config['num_heads']*32),
-            'd_ffn': tune.choice(list(range(256, 513))),
-            'dropout': tune.choice([0.1, 0.2, 0.3]),
-            'weight_decay_enc': tune.choice([5e-2, 6e-2, 7e-2, 8e-2]),
-            'lr_enc': tune.choice([4e-3, 5e-3, 6e-3, 7e-3]),
-            # 'weight_decay_dec': tune.choice([1e-1,9e-2,8e-2,7e-2,6e-2,5e-2,4e-2,3e-2,2e-2,
-            #                                  1e-2,9e-3,8e-3,7e-3,6e-3,5e-3,4e-3,3e-3,2e-3,1e-3]),
-            # 'lr': tune.choice([1e-2,9e-3,8e-3,7e-3,6e-3,5e-3,4e-3,3e-3,2e-3,
-            #                    1e-3,9e-4,8e-4,7e-4,6e-4,5e-4,4e-4,3e-4,2e-4,1e-4]),
-            'bs_enc ':tune.choice([32,128]),
-            # 'bs ':tune.choice([32,64,128,256])
+            'd_ffn': tune.sample_from(lambda _: random.choice(list(range(256, 513)))),
+            # 'dropout': tune.choice([0.1, 0.2, 0.3]),
+            # 'weight_decay_enc': tune.choice([5e-2, 6e-2, 7e-2, 8e-2]),
+            # 'lr_enc': tune.choice([4e-3, 5e-3]),
+            'weight_decay_dec': tune.choice([1e-1,9e-2,8e-2,7e-2,6e-2,5e-2,4e-2,3e-2,2e-2,1e-2]),
+            'lr': tune.choice([4e-3,3e-3,2e-3,1e-3,9e-4,8e-4,7e-4,6e-4,5e-4,4e-4,3e-4,2e-4,1e-4]),
+            # 'bs_enc ':tune.choice([32,128]),
+            'bs ':tune.choice([32,64,128,256])
         }
         
         # ray 초기화 및 실행

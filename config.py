@@ -24,22 +24,22 @@ ciao_timestamp={
 epinions={
          "model":{
             "enc_blocks":1, # 고정
-            "dec_blocks":2,
+            "dec_blocks":1, # 고정
             "n_experts":6, # 마지막 튜닝
             "topk":2, # 마지막 튜닝
             "num_heads":6, # 고정
             "d_model":32*6, # 고정
-            "d_ffn":256, # [128,256]
-            "dropout": 0.2,
+            "d_ffn":256, # 256이나 400근처
+            "dropout": 0.1, # 고정
             "moe":True
          },
          "training":{
-            "weight_decay_enc":6e-2, # 0.05~0.08
-            "weight_decay_dec":3e-2, # tuning 필요
-            "lr_enc":4e-3, 
+            "weight_decay_enc":5e-2, # 고정
+            "weight_decay_dec":3e-2, # [1e-2 ~ 1e-1]
+            "lr_enc":5e-3, # 고정
             "lr":1e-3, # 1e-3 근처
             "num_epochs":300,
-            "bs_enc":32, # [32,128]
+            "bs_enc":32, # 고정
             "bs_dec":128 # [32,64,128,256]
          },
      }
