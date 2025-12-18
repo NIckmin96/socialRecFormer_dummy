@@ -42,9 +42,9 @@ class DatasetMaking:
         print(self.min_item_len)
 
         # Random Walk Sequence 생성
-        self.random_walk_train, rw_train_path = utils.generate_social_random_walk_sequence(data_path, self.rating_train, self.social_train, walk_length=args.user_seq_len, augs=args.augs, data_split_seed=args.seed, split='train', regen=args.regen)
-        self.random_walk_valid, rw_valid_path = utils.generate_social_random_walk_sequence(data_path, self.rating_valid, self.social_valid, walk_length=args.user_seq_len, augs=1, data_split_seed=args.seed, split='valid', regen=args.regen)
-        self.random_walk_test, rw_test_path = utils.generate_social_random_walk_sequence(data_path, self.rating_test, self.social_test, walk_length=args.user_seq_len, augs=1, data_split_seed=args.seed, split='test', regen=args.regen)
+        self.random_walk_train = utils.generate_social_random_walk_sequence(data_path, self.rating_train, self.social_train, walk_length=args.user_seq_len, augs=args.augs, data_split_seed=args.seed, split='train', regen=args.regen)
+        self.random_walk_valid = utils.generate_social_random_walk_sequence(data_path, self.rating_valid, self.social_valid, walk_length=args.user_seq_len, augs=1, data_split_seed=args.seed, split='valid', regen=args.regen)
+        self.random_walk_test = utils.generate_social_random_walk_sequence(data_path, self.rating_test, self.social_test, walk_length=args.user_seq_len, augs=1, data_split_seed=args.seed, split='test', regen=args.regen)
         
         # 모델 입력을 위한 최종 데이터셋 구성(rating)
         if args.regen=='train':

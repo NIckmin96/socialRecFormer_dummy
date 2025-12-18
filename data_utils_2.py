@@ -240,7 +240,7 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
         print("\n")
         df.to_csv(file_path, index=False)
 
-        return df
+    return df
 
 
 def find_next_node(input_G, previous_node, current_node): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음

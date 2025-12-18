@@ -757,27 +757,25 @@ def main():
         print("Starting Ray Tune Hyperparameter Search")
         print("="*60)
         print(f"Fixed args: {args_dict}")
-        # args_dict = vars(args)
-        # print(type(args_dict))
         # parameters to Tune
         search_space = {
             'args_dict': args_dict,
             # 'user_seq_len':tune.choice([20,30,40]),
             # 'item_per_user':tune.choice([2,3,4,5,6]),
             # 'enc_blocks': tune.choice([1,2,3]),
-            # 'dec_blocks': tune.choice([1,2]),
-            'n_experts': tune.choice([2,3,4,5,6,7,8]),
-            'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
-            # 'num_heads': tune.choice([3,4,5,6,7]),
-            # 'd_model': tune.sample_from(lambda spec:spec.config['num_heads']*32),
+            # 'dec_blocks': tune.choice([1,2,3]),
+            # 'n_experts': tune.choice([2,3,4,5,6,7,8]),
+            # 'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
+            'num_heads': tune.choice(list(np.arange(2,9))),
+            'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*32, spec.config['num_heads']*64])),
             'd_ffn': tune.sample_from(lambda _: random.choice(list(range(256, 513)))),
             # 'dropout': tune.choice([0.1, 0.2, 0.3]),
-            # 'weight_decay_enc': tune.choice([5e-2, 6e-2, 7e-2, 8e-2]),
-            # 'lr_enc': tune.choice([4e-3, 5e-3]),
-            'weight_decay_dec': tune.choice([1e-1,9e-2,8e-2,7e-2,6e-2,5e-2,4e-2,3e-2,2e-2,1e-2]),
-            'lr': tune.choice([4e-3,3e-3,2e-3,1e-3,9e-4,8e-4,7e-4,6e-4,5e-4,4e-4,3e-4,2e-4,1e-4]),
-            # 'bs_enc ':tune.choice([32,128]),
-            'bs ':tune.choice([32,64,128,256])
+            'weight_decay_enc': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
+            'lr_enc': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
+            # 'weight_decay_dec': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
+            # 'lr': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
+            # 'bs_enc':tune.choice([32,64,128]),
+            # 'bs ':tune.choice([32,64,128,256])
         }
         
         # ray 초기화 및 실행
@@ -801,7 +799,8 @@ def main():
                         raise_on_failed_trial=False, 
                         checkpoint_freq=0,
                         storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
-                        name=f'{args.dataset}_{part}_{now_str}',
+                        # name=f'{args.dataset}_{part}_{now_str}',
+                        name=f'{args.dataset}_{part}_block_3',
                         metric=metric, mode=mode
                         )
                     

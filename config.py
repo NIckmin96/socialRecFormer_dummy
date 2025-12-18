@@ -1,11 +1,11 @@
 ciao_timestamp={  
          "model":{
-            "enc_blocks":2,
+            "enc_blocks":3,
             "dec_blocks":2,
             "n_experts":4, # 마지막 튜닝
             "topk":3, # 마지막 튜닝
             "num_heads":6,
-            "d_model":32*6,
+            "d_model":64*6,
             "d_ffn":256,
             "dropout": 0.2,
             "moe":True
@@ -16,7 +16,7 @@ ciao_timestamp={
             "lr_enc":3e-2,
             "lr":4e-3,
             "num_epochs":300,
-            "bs_enc":32, 
+            "bs_enc":32, # fix
             "bs_dec":32
          },
      }

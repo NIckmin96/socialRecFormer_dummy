@@ -7,7 +7,7 @@ class EncoderLayer(nn.Module):
     Input:
         fixed-length random walk sequence (generated from social graph)
     """
-    def __init__(self, user_seq_len, item_seq_len, d_model, d_ffn, num_heads, n_experts, topk, dropout, moe):
+    def __init__(self, user_seq_len, item_seq_len, d_model, num_heads, dropout, moe):
         super(EncoderLayer, self).__init__()
         # self.moe = moe # T/F
         self.moe_ffn = moe # MoE/FFN 모듈 자체를 받음

@@ -24,10 +24,7 @@ class Encoder(nn.Module):
                 user_seq_len = user_seq_len,
                 item_seq_len = item_seq_len,
                 d_model = d_model,
-                d_ffn = d_ffn,
                 num_heads = num_heads,
-                n_experts = n_experts,
-                topk = topk,
                 dropout = dropout,
                 moe = moe_ffn
             ) for _ in range(num_layers)]
