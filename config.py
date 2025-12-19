@@ -1,6 +1,6 @@
 ciao_timestamp={  
          "model":{
-            "enc_blocks":3,
+            "enc_blocks":1, # fix
             "dec_blocks":2,
             "n_experts":4, # 마지막 튜닝
             "topk":3, # 마지막 튜닝

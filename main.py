@@ -767,7 +767,7 @@ def main():
             # 'n_experts': tune.choice([2,3,4,5,6,7,8]),
             # 'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
             'num_heads': tune.choice(list(np.arange(2,9))),
-            'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*32, spec.config['num_heads']*64])),
+            'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*32])),
             'd_ffn': tune.sample_from(lambda _: random.choice(list(range(256, 513)))),
             # 'dropout': tune.choice([0.1, 0.2, 0.3]),
             'weight_decay_enc': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
@@ -800,7 +800,7 @@ def main():
                         checkpoint_freq=0,
                         storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
                         # name=f'{args.dataset}_{part}_{now_str}',
-                        name=f'{args.dataset}_{part}_block_3',
+                        name=f'{args.dataset}_{part}_d_model_32',
                         metric=metric, mode=mode
                         )
                     
