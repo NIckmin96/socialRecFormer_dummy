@@ -44,11 +44,11 @@ def compute_shortest_path_distance(
         output_file: output .npy filename
         threshold: value for unreachable nodes (defaults to n + 1)
     """
-    output_path = os.path.join(dataset, output_file)
+    output_path = os.path.join('./dataset', dataset, output_file)
     if os.path.isfile(output_path):
         return np.load(output_path)
 
-    social_path = os.path.join(dataset, social_file)
+    social_path = os.path.join('./dataset', dataset, social_file)
     edge_df = _load_edges(social_path)
 
     max_user_id = int(edge_df[["user_id_1", "user_id_2"]].to_numpy().max())
@@ -66,7 +66,7 @@ def compute_shortest_path_distance(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compute user-user shortest-path distances.")
-    parser.add_argument("dataset", help="Dataset path containing trustnetwork.csv")
+    parser.add_argument("--dataset", help="Dataset path containing trustnetwork.csv")
     parser.add_argument("--social-file", default="trustnetwork.csv")
     parser.add_argument("--output-file", default="shortest_path_result.npy")
     parser.add_argument("--threshold", type=int, default=None)
