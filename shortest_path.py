@@ -30,7 +30,7 @@ def _build_adjacency(edge_df: pd.DataFrame, num_nodes: int) -> csr_matrix:
 
 
 def compute_shortest_path_distance(
-    data_path: str,
+    dataset: str,
     social_file: str = "trustnetwork.csv",
     output_file: str = "shortest_path_result.npy",
     threshold: Optional[int] = None,
@@ -39,16 +39,16 @@ def compute_shortest_path_distance(
     Compute all-pairs shortest-path distances using a user-user graph.
 
     Args:
-        data_path: dataset directory containing trustnetwork.csv
+        dataset: dataset directory containing trustnetwork.csv
         social_file: social edge list filename
         output_file: output .npy filename
         threshold: value for unreachable nodes (defaults to n + 1)
     """
-    output_path = os.path.join(data_path, output_file)
+    output_path = os.path.join(dataset, output_file)
     if os.path.isfile(output_path):
         return np.load(output_path)
 
-    social_path = os.path.join(data_path, social_file)
+    social_path = os.path.join(dataset, social_file)
     edge_df = _load_edges(social_path)
 
     max_user_id = int(edge_df[["user_id_1", "user_id_2"]].to_numpy().max())
@@ -66,14 +66,14 @@ def compute_shortest_path_distance(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compute user-user shortest-path distances.")
-    parser.add_argument("data_path", help="Dataset path containing trustnetwork.csv")
+    parser.add_argument("dataset", help="Dataset path containing trustnetwork.csv")
     parser.add_argument("--social-file", default="trustnetwork.csv")
     parser.add_argument("--output-file", default="shortest_path_result.npy")
     parser.add_argument("--threshold", type=int, default=None)
     args = parser.parse_args()
 
     compute_shortest_path_distance(
-        data_path=args.data_path,
+        dataset=args.dataset,
         social_file=args.social_file,
         output_file=args.output_file,
         threshold=args.threshold,
