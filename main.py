@@ -768,7 +768,7 @@ def main():
             # 'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
             'num_heads': tune.choice(list(np.arange(5,9))),
             'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*32, spec.config['num_heads']*64])),
-            'd_ffn': tune.sample_from(lambda _: random.choice(list(range(256, 1025)))),
+            'd_ffn': tune.choice([256, 512, 1024]),
             # 'dropout': tune.choice([0.1, 0.2, 0.3]),
             'weight_decay_enc': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))),
             'lr_enc': tune.choice(list(np.arange(1e-2, 1e-3-1e-9, -0.001))),
@@ -794,7 +794,7 @@ def main():
         part = 'full' if args.decoder else 'enc'
         now = datetime.datetime.now()
         now_str = now.strftime("%m%d_%H%M")
-        analysis = tune.run(run, config=search_space, num_samples=1000,
+        analysis = tune.run(run, config=search_space, num_samples=500,
                         resources_per_trial={'cpu':4, 'gpu':1},
                         raise_on_failed_trial=False, 
                         checkpoint_freq=0,
