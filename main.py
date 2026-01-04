@@ -767,15 +767,15 @@ def main():
             # 'n_experts': tune.choice([2,3,4,5,6,7,8]),
             # 'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
             'num_heads': tune.choice(list(np.arange(5,9))),
-            'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*32, spec.config['num_heads']*64])),
-            'd_ffn': tune.choice([256, 512, 1024]),
+            'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*64])),
+            'd_ffn': tune.choice([256, 512]),
             # 'dropout': tune.choice([0.1, 0.2, 0.3]),
-            'weight_decay_enc': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))),
-            'lr_enc': tune.choice(list(np.arange(1e-2, 1e-3-1e-9, -0.001))),
+            'weight_decay_enc': tune.choice([0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
+            'lr_enc': tune.choice([0.002, 0.003, 0.004, 0.005, 0.006]),
             # 'weight_decay_dec': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
             # 'lr': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
             # 'bs_enc':tune.choice([32,64,128]),
-            # 'bs ':tune.choice([32,64,128,256])
+            'bs ':tune.choice([32,64,128,256])
         }
         
         # ray 초기화 및 실행
@@ -794,13 +794,13 @@ def main():
         part = 'full' if args.decoder else 'enc'
         now = datetime.datetime.now()
         now_str = now.strftime("%m%d_%H%M")
-        analysis = tune.run(run, config=search_space, num_samples=500,
+        analysis = tune.run(run, config=search_space, num_samples=50,
                         resources_per_trial={'cpu':4, 'gpu':1},
                         raise_on_failed_trial=False, 
                         checkpoint_freq=0,
                         storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
-                        name=f'{args.dataset}_{part}_{now_str}',
-                        # name=f'{args.dataset}_{part}_d_model_32',
+                        # name=f'{args.dataset}_{part}_{now_str}',
+                        name=f'{args.dataset}_{part}_bs_128',
                         metric=metric, mode=mode
                         )
                     
