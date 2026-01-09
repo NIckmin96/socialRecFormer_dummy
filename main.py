@@ -764,24 +764,25 @@ def main():
             # 'item_per_user':tune.choice([2,3,4,5,6]),
             # 'enc_blocks': tune.choice([1,2,3]),
             # 'dec_blocks': tune.choice([1,2,3]),
-            # 'n_experts': tune.choice([2,3,4,5,6,7,8]),
-            # 'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
+            'n_experts': tune.choice([2,3,4,5,6,7,8]),
+            'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
             'num_heads': tune.choice(list(np.arange(5,9))),
             'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*64])),
             'd_ffn': tune.choice([256, 512]),
-            # 'dropout': tune.choice([0.1, 0.2, 0.3]),
+            'dropout': tune.choice([0.1, 0.2, 0.3]),
             'weight_decay_enc': tune.choice([0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
-            'lr_enc': tune.choice([0.002, 0.003, 0.004, 0.005, 0.006]),
-            # 'weight_decay_dec': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
-            # 'lr': tune.choice(list(np.arange(1e-1, 1e-2-1e-9, -0.01))+list(np.arange(1e-2, 1e-3-1e-9, -0.001))+list(np.arange(1e-3, 1e-4-1e-9, -0.0001))),
+            'lr_enc': tune.choice([0.003, 0.004, 0.005]),
+            # 'weight_decay_dec': tune.choice([0.07, 0.08, 0.09]),
+            # 'lr': tune.choice([0.0005, 0.0006, 0.0007, 0.0008, 0.0009, 0.001]),
             # 'bs_enc':tune.choice([32,64,128]),
-            'bs ':tune.choice([32,64,128,256])
+            # 'bs ':tune.choice([32,64,128,256])
         }
         
         # ray 초기화 및 실행
         if not ray.is_initialized():
+            os.environ['CUDA_VISIBLE_DEVICES'] = "1,2,3"
             ray.init(
-                num_cpus=24, num_gpus=4,
+                num_cpus=24, num_gpus=3,
                 ignore_reinit_error=True)
             
         if args.decoder:
@@ -794,13 +795,13 @@ def main():
         part = 'full' if args.decoder else 'enc'
         now = datetime.datetime.now()
         now_str = now.strftime("%m%d_%H%M")
-        analysis = tune.run(run, config=search_space, num_samples=50,
+        analysis = tune.run(run, config=search_space, num_samples=100,
                         resources_per_trial={'cpu':4, 'gpu':1},
                         raise_on_failed_trial=False, 
                         checkpoint_freq=0,
                         storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
-                        # name=f'{args.dataset}_{part}_{now_str}',
-                        name=f'{args.dataset}_{part}_bs_128',
+                        name=f'{args.dataset}_{part}_{now_str}',
+                        # name=f'{args.dataset}_{part}_block_3',
                         metric=metric, mode=mode
                         )
                     

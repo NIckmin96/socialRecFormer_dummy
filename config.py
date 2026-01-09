@@ -1,7 +1,7 @@
 ciao_timestamp={  
          "model":{
             "enc_blocks":1, # fix
-            "dec_blocks":3,
+            "dec_blocks":3, # fix
             "n_experts":4, # 마지막 튜닝
             "topk":3, # 마지막 튜닝
             "num_heads":6,
@@ -12,12 +12,12 @@ ciao_timestamp={
          },
          "training":{
             "weight_decay_enc":9e-2,
-            "weight_decay_dec":3e-2,
+            "weight_decay_dec":9e-2, # 
             "lr_enc":3e-2,
-            "lr":4e-3,
+            "lr":8e-4, # 
             "num_epochs":300,
             "bs_enc":32, # fix
-            "bs_dec":64
+            "bs_dec":32 # fix
          },
      }
 
