@@ -141,18 +141,19 @@ def shuffle_and_split_dataset(data_path:str, df_len, test, seed, regen):
         num_test = int(len(split_rating_df)*test)
         print("num test :", num_test)
         
-        # rating_test_set = split_rating_df.iloc[:num_test]
-        # rating_train_set = split_rating_df.iloc[num_test:]
-        
-        rating_test_set = split_rating_df.iloc[:num_test//2]
-        rating_valid_set = split_rating_df.iloc[num_test//2:num_test]
+        rating_test_set = split_rating_df.iloc[:num_test]
         rating_train_set = split_rating_df.iloc[num_test:]
-
         rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
-        rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
         rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
-    
-    print(f"data split finished, seed: {seed}\n")
+        
+    return rating_train_set, rating_test_set
+        
+        # rating_test_set = split_rating_df.iloc[:num_test//2]
+        # rating_valid_set = split_rating_df.iloc[num_test//2:num_test]
+        # rating_train_set = split_rating_df.iloc[num_test:]
+        # rating_test_set.to_csv(data_path + f'/rating_test_seed_{seed}.csv', index=False)
+        # rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
+        # rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
     
     return rating_train_set, rating_valid_set, rating_test_set
     # return rating_train_set, rating_test_set
@@ -243,9 +244,15 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
     return df
 
 
-def find_next_node(input_G, previous_node, current_node): # 확률적으로, anchor node가 동일하다면 중복되는 random walk sequence가 나올수도 있음
-    # 문제 : neighbor가 많을 경우에, 이전 노드로 돌아갈 확률이 다른 노드로 갈 확률보다 높아짐 -> 의도된 것?
-    # return param을 고정하지않고, neighbor의 개수에 따라 유동적으로 변하는게 합리적임 -> n개의 neighbor가 있으면, x = (1/n)*n + return, 1 = (1/nx)*n + return/x
+def find_next_node(input_G, previous_node, current_node): 
+    '''
+    - previosu_node가 None인(sequence의 길이가 1인) 경우에, current_node의 neighbor node를 후보로 삼고 동일하게 1/n의 확률로 next_node를 random select
+    - 그렇지 않은 경우, current_node의 neighbor에서 previous node를 제외한 node를 neighbor로 삼고,
+        - neighbor node가 존재하지 않는 경우에, 전체 graph에서 random한 node를 뽑아서 다음 node로 삼음(?) => 0으로 padding하도록 수정
+        - current_node가 0(sequence padding이 사작)된 경우에, 계속 0을 return
+        - previous node로 돌아갈 확률 = 1/(n+max(n,2))
+        - previous node를 제외한 다른 노드가 선택될 확률 = (1- previous node가 선택될 확률)/(n)
+    '''
     if previous_node!=None:
         if current_node in input_G.nodes():
             neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
@@ -254,7 +261,8 @@ def find_next_node(input_G, previous_node, current_node): # 확률적으로, anc
         
         n = len(neighbors)
         if n==0:
-            return np.random.choice(input_G.nodes()).item()
+            # return np.random.choice(input_G.nodes()).item()
+            return 0
         
         return_prob = 1/(n+max(n,2))
         edge_prob = (1-return_prob)/n

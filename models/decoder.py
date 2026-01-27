@@ -40,6 +40,8 @@ class Decoder(nn.Module):
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
             x_item, attention, enc_output = layer(x_item, enc_output, item_mask, item_user_mask)
+            
+        self.user_reptn = enc_output
         
         # MF
         enc_output = enc_output[:,0,:].unsqueeze(1)

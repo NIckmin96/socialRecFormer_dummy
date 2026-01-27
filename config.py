@@ -2,19 +2,19 @@ ciao_timestamp={
          "model":{
             "enc_blocks":1, # fix
             "dec_blocks":3, # fix
-            "n_experts":4, # 마지막 튜닝
+            "n_experts":6, # 마지막 튜닝
             "topk":3, # 마지막 튜닝
-            "num_heads":6,
-            "d_model":64*6,
-            "d_ffn":256,
-            "dropout": 0.2,
+            "num_heads":8,
+            "d_model":64*8,
+            "d_ffn":512, # fix
+            "dropout": 0.3, # fix
             "moe":True
          },
          "training":{
-            "weight_decay_enc":9e-2,
-            "weight_decay_dec":9e-2, # 
-            "lr_enc":3e-2,
-            "lr":8e-4, # 
+            "weight_decay_enc":1e-1, # fix
+            "weight_decay_dec":8e-2, # fix
+            "lr_enc":4e-3, # fix
+            "lr":9e-4, # fix
             "num_epochs":300,
             "bs_enc":32, # fix
             "bs_dec":32 # fix
@@ -24,45 +24,45 @@ ciao_timestamp={
 epinions={
          "model":{
             "enc_blocks":1, # 고정
-            "dec_blocks":1, # 고정
-            "n_experts":6, # 마지막 튜닝
-            "topk":2, # 마지막 튜닝
-            "num_heads":6, # 고정
-            "d_model":32*6, # 고정
-            "d_ffn":256, # 256이나 400근처
-            "dropout": 0.1, # 고정
+            "dec_blocks":3, # 고정
+            "n_experts":6, # tune.choice([5,6,7,8]),
+            "topk":2, # tune.sample_from(lambda spec:random.randint(2,spec.config['n_experts']-1)),
+            "num_heads":8, # 고정
+            "d_model":64*8, # 고정
+            "d_ffn":512, # 고정
+            "dropout": 0.3, # fix
             "moe":True
          },
          "training":{
-            "weight_decay_enc":5e-2, # 고정
-            "weight_decay_dec":3e-2, # [1e-2 ~ 1e-1]
-            "lr_enc":5e-3, # 고정
-            "lr":1e-3, # 1e-3 근처
+            "weight_decay_enc":5e-2, # fix
+            "weight_decay_dec":9e-2, # fix
+            "lr_enc":5e-3, # fix
+            "lr":7e-4, # fix
             "num_epochs":300,
-            "bs_enc":32, # 고정
-            "bs_dec":128 # [32,64,128,256]
+            "bs_enc":32, # fix
+            "bs_dec":32 # fix
          },
      }
 
 yelp={
          "model":{
             "enc_blocks":1,
-            "dec_blocks":1,
+            "dec_blocks":3,
             "n_experts":2,
             "topk":1,
-            "num_heads":4,
-            "d_model":32*4,
-            "d_ffn":256,
-            "dropout": 0.2,
+            "num_heads":8,
+            "d_model":32*8,
+            "d_ffn":512,
+            "dropout": 0.3,
             "moe":True
          },
          "training":{
-            "weight_decay_enc":4e-2,
-            "weight_decay_dec":5e-3,
-            "lr_enc":1e-2,
-            "lr":1e-4,
+            "weight_decay_enc":5e-2,
+            "weight_decay_dec":9e-2,
+            "lr_enc":5e-3,
+            "lr":7e-4,
             "num_epochs":300,
-            "bs_enc":256,
+            "bs_enc":32,
             "bs_dec":256
          },
      }

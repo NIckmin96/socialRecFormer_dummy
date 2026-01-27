@@ -206,6 +206,32 @@ class Metrics:
         # 보정
         ndcg*=(new_k/k)
         return ndcg
+    
+    # def rank_metrics(self, items, logits, ratings, k=10):
+    #     eps = 1e-10
+    #     new_k = min(k, len(ratings))
+    #     gt_items = items[ratings!=0] # 실제로 interact한 items
+    #     _, rec_indices = torch.from_numpy(logits).topk(new_k)
+    #     recommended_i = torch.from_numpy(items)[rec_indices].flatten()
+    #     recommended_r = torch.from_numpy(ratings)[rec_indices].flatten()
+        
+    #     _, ideal_indices = torch.from_numpy(ratings).topk(new_k)
+    #     ideal_i = torch.from_numpy(items)[ideal_indices].flatten()
+    #     ideal_r = torch.from_numpy(ratings)[ideal_indices].flatten()
+    #     discount = torch.log2(torch.arange(new_k)+2)
+    #     item_mask = torch.tensor(list(map(lambda x:1 if x in set(gt_items.tolist()) else 0, list(recommended_i))))
+        
+    #     DCG = torch.sum(recommended_r*item_mask/discount)
+    #     IDCG = torch.sum(ideal_r/discount)
+    #     NDCG = DCG/(IDCG+eps)
+    #     assert NDCG<=1.0
+        
+    #     # precision
+    #     TP = set(recommended_i.tolist()).intersection(set(gt_items.tolist()))
+    #     precision = round(len(TP)/new_k, 4) if new_k>0 else 0.0
+    #     recall = round(len(TP)/len(gt_items), 4) if len(gt_items)>0 else 0.0
+        
+    #     return NDCG, new_k, precision, recall
         
     def rank_metrics(self, x, k):
         user = x['anchor_user']
@@ -228,17 +254,17 @@ class Metrics:
         # rec_items  = torch.gather(items,-1,rec_idx)
         # rec_ratings = torch.gather(ratings,-1,rec_idx)
         
-        # mask (ideal에 존재하는지 여부)
-        rowA = rec_items.unsqueeze(1)
-        rowB = ideal_items.unsqueeze(0)
-        mask = (rowA==rowB).any(dim=1)
-        rec_ratings *= mask
+        # # mask (ideal에 존재하는지 여부)
+        # rowA = rec_items.unsqueeze(1)
+        # rowB = ideal_items.unsqueeze(0)
+        # mask = (rowA==rowB).any(dim=1)
+        # rec_ratings *= mask
         # dcg/idcg/ndcg
         discount = torch.log2(torch.arange(new_k)+2)
         dcg = torch.sum(rec_ratings/discount, dim=-1)
         idcg = torch.sum(ideal_ratings/discount, dim=-1)
         ndcg = dcg/(idcg+1e-10).item()
-        ndcg *= (new_k/k) # 보정
+        # ndcg *= (new_k/k) # 보정
         # precision / recall
         rec_items = rec_items.tolist()
         ideal_items = ideal_items.tolist()

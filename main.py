@@ -93,7 +93,14 @@ def train_encoder(device, model, optimizer, lr_scheduler, ds_iter, training_conf
             enc_output, global_preference = model.encoder(batch)
 
             sub_mask = (batch['item_rating'] != 0)
+            
+            # RMSE
             sub_loss = metrics.RMSE(global_preference, batch['item_rating'], sub_mask)
+            # Huber Loss
+            # sub_loss = F.huber_loss(global_preference, batch['item_rating'], delta=1.0, reduction='none')
+            # sub_loss = sub_loss * sub_mask
+            # sub_loss = sub_loss.sum() / (sub_mask.sum() + 1e-8)
+            
             sub_losses.update(sub_loss.item())
             
             nn.utils.clip_grad_value_(model.encoder.parameters(), clip_value=1) # Gradient Clipping
@@ -127,7 +134,7 @@ def valid_encoder(device, model, ds_iter, epoch, checkpoint_path, best_rmse, upd
     preds, targets, masks = [],[],[]
     with torch.no_grad():
         # dec_iterator = tqdm(ds_iter['valid'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
-        dec_iterator = tqdm(ds_iter['test'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
+        dec_iterator = tqdm(ds_iter['test_enc'], desc="Validating (X / X Steps) (loss=X.X)", bar_format="{l_bar}{r_bar}", dynamic_ncols=True, leave=False)
         for step, batch in enumerate(dec_iterator):     
             batch = {k:v.to(device) for k,v in batch.items()}
             
@@ -190,11 +197,25 @@ def train(device, model, optimizer, lr_scheduler, ds_iter, training_config):
             output, global_preference = model(batch)
             
             main_mask = (batch['anchor_ratings'] != 0)
+            # MSE 
             main_loss = metrics.MSE(output, batch['anchor_ratings'], main_mask)
+            
+            # Huber loss
+            # main_loss = F.huber_loss(output, batch['anchor_ratings'], delta=1.0, reduction='none')
+            # main_loss = main_loss * main_mask
+            # main_loss = main_loss.sum() / (main_mask.sum() + 1e-8)
+            
             main_losses.update(main_loss.item())
-
-            rank_logit = F.log_softmax(output, dim=-1).float()
-            rank_target = F.softmax(batch['anchor_ratings'], dim=-1)
+            
+            # KLD /w mask
+            fill_value = -1e9 
+            masked_output = output.masked_fill(~main_mask, fill_value)
+            masked_target = batch['anchor_ratings'].masked_fill(~main_mask, fill_value)
+            rank_logit = F.log_softmax(masked_output, dim=-1).float()
+            rank_target = F.softmax(masked_target, dim=-1)
+            # ORG
+            # rank_logit = F.log_softmax(output, dim=-1).float()
+            # rank_target = F.softmax(batch['anchor_ratings'], dim=-1)
             rank_loss = F.kl_div(rank_logit, rank_target, reduction='batchmean')
             rank_losses.update(rank_loss.item())
             
@@ -269,7 +290,7 @@ def valid(device, model, ds_iter, epoch, checkpoint_path, global_step, best_rmse
             item_lst, rating_lst, output_lst = [],[],[]
             for i in range(batch['anchor_user'].size(0)):
                 mask = (batch['anchor_items'][i]!=0) # padding되지 않은 index
-                items = items = batch['anchor_items'][i][mask].data.cpu().tolist()
+                items = batch['anchor_items'][i][mask].data.cpu().tolist()
                 ratings = batch['anchor_ratings'][i][mask].data.cpu().tolist()
                 outputs = output[i][mask].data.cpu().tolist()
                 assert len(items)==len(ratings)==len(outputs)
@@ -440,13 +461,18 @@ def str2bool(v):
 def get_args():
                 
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
-    parser.add_argument("--encoder", type=str2bool, default=False)
-    parser.add_argument("--decoder", type=str2bool, default=True)
-    parser.add_argument("--moe", type=str2bool, default=True)
+    # parser.add_argument("--encoder", type=str2bool, default=False)
+    # parser.add_argument("--decoder", type=str2bool, default=True)
+    # parser.add_argument("--moe", type=str2bool, default=True)
+    # parser.add_argument("--eval", type = str2bool, default=False)
+    # parser.add_argument("--tune", type = str2bool, default=False)
+    parser.add_argument("--encoder", action='store_true')
+    parser.add_argument("--decoder", action='store_true')
+    parser.add_argument("--moe", action='store_false')
+    parser.add_argument("--eval", action='store_true')
+    parser.add_argument("--tune", action='store_true')
     parser.add_argument("--device", type=str, default='single')
     parser.add_argument("--id", type=int, default=0)
-    parser.add_argument("--eval", type = str2bool, default=False)
-    parser.add_argument("--tune", type = str2bool, default=False)
     parser.add_argument('--seed', type=int, default=42)
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
@@ -515,15 +541,16 @@ def run(config, checkpoint_dir=None):
     print("\n")
     
     total_train = data_making.total_train
-    total_valid = data_making.total_valid
+    # total_valid = data_making.total_valid
     total_test = data_making.total_test
     
     min_item_len = data_making.min_item_len
     
     # dataset & dataloader
     train_enc = EncoderDataset(total_train)
+    test_enc = EncoderDataset(total_test)
     train_ds = DecoderDataset(total_train)
-    valid_ds = DecoderDataset(total_valid)
+    # valid_ds = DecoderDataset(total_valid)
     test_ds = DecoderDataset(total_test)
     
     model_config = Config[args.dataset]["model"].copy()
@@ -552,8 +579,9 @@ def run(config, checkpoint_dir=None):
     ds_iter = {
             "train_enc":DataLoader(train_enc, batch_size = training_config['bs_enc'], shuffle=True, num_workers=4),
             "train":DataLoader(train_ds, batch_size = training_config['bs_dec'], shuffle=True, num_workers=4),
-            "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
+            "test_enc":DataLoader(test_enc, batch_size = test_bs, shuffle=False, num_workers=1),
             "test":DataLoader(test_ds, batch_size = test_bs, shuffle=False, num_workers=1)
+            # "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
     }
     
     ######################################################### model initialization #########################################################
@@ -614,8 +642,8 @@ def run(config, checkpoint_dir=None):
     if args.device=='cpu':
         device = torch.device(args.device)
     else:
-        # device = torch.device(f'cuda:{args.id}' if torch.cuda.is_available() else 'cpu')
-        device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device(f'cuda:{args.id}' if torch.cuda.is_available() else 'cpu')
+        # device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
     
     # print(f"GPU index: {device.index}")
     print(f"GPU : {device}")
@@ -701,8 +729,10 @@ def run(config, checkpoint_dir=None):
             lr_scheduler = (args.dec_scheduler, scheduler)
             
             # Decoder Train
-            best_model = train(device, model, opt_dec, lr_scheduler, ds_iter, training_config)
-            model.load_state_dict(best_model)
+            # model.load_state_dict(best_model)
+            _ = train(device, model, opt_dec, lr_scheduler, ds_iter, training_config)
+            checkpoint = torch.load(training_config['checkpoint_path'])
+            model.load_state_dict(checkpoint['model_state_dict'])
             score, best_rmse, best_ndcg = eval(device, model, ds_iter)
             
             # 메모리 정리
@@ -716,15 +746,27 @@ def run(config, checkpoint_dir=None):
         print(checkpoint_path)
         if os.path.exists(checkpoint_path): #and checkpoint_path != os.getcwd() + '/checkpoints/test.model':
             model.eval()
+            # user_idx = []
+            # user_reptn = []
             with torch.no_grad():
                 batch = next(iter(ds_iter['train']))
                 batch = {k:v.to(device) for k,v in batch.items()}
+                # user_idx.append(batch['user_seq'].cpu())
+                
                 checkpoint = torch.load(checkpoint_path)
                 model.load_state_dict(checkpoint["model_state_dict"])
                 print("loading the best model from: " + checkpoint_path)
                 score, best_rmse, best_ndcg = eval(device, model, ds_iter)
                 _ = model(batch)
                 torch.save(model.encoder.global_attention.cpu(), 'soft_attn.pt') # attention map 저장
+                # user_reptn.append(model.decoder.user_reptn.cpu())
+                
+            # user_idx = torch.cat(user_idx, dim=0)
+            # user_reptn = torch.cat(user_reptn, dim=0)
+            # torch.save(user_idx, 'user_idx_soft.pt') # user representation(embedding) 저장
+            # torch.save(user_reptn, 'user_embed_soft.pt') # user representation(embedding) 저장
+            
+                torch.save(model.user_embed.node_encoder.weight.cpu(), 'user_embed_soft.pt') # user representation(embedding) 저장
         else:
             print("No Best Model Found")
             
@@ -762,27 +804,34 @@ def main():
             'args_dict': args_dict,
             # 'user_seq_len':tune.choice([20,30,40]),
             # 'item_per_user':tune.choice([2,3,4,5,6]),
-            # 'enc_blocks': tune.choice([1,2,3]),
+            'enc_blocks': tune.choice([1,2,3]),
             # 'dec_blocks': tune.choice([1,2,3]),
-            'n_experts': tune.choice([2,3,4,5,6,7,8]),
-            'topk': tune.sample_from(lambda spec:random.randint(1,spec.config['n_experts']-1)),
-            'num_heads': tune.choice(list(np.arange(5,9))),
-            'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*64])),
-            'd_ffn': tune.choice([256, 512]),
-            'dropout': tune.choice([0.1, 0.2, 0.3]),
-            'weight_decay_enc': tune.choice([0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
-            'lr_enc': tune.choice([0.003, 0.004, 0.005]),
-            # 'weight_decay_dec': tune.choice([0.07, 0.08, 0.09]),
-            # 'lr': tune.choice([0.0005, 0.0006, 0.0007, 0.0008, 0.0009, 0.001]),
+            # 'n_experts': tune.choice([5,6,7,8]),
+            # 'topk': tune.sample_from(lambda spec:random.randint(2,spec.config['n_experts']-1)),
+            # 'num_heads': tune.choice(list(np.arange(5,9))),
+            # 'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*64])),
+            # 'd_ffn': tune.choice([256, 512]),
+            # 'dropout': tune.choice([0.1, 0.2, 0.3]),
+            'weight_decay_enc': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1,
+                                             0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]),
+            'lr_enc': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1,
+                                             0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]),
+            # 'weight_decay_dec': tune.choice([0.09]),
+            # 'lr': tune.choice([0.0007, 0.0008]),
             # 'bs_enc':tune.choice([32,64,128]),
-            # 'bs ':tune.choice([32,64,128,256])
+            # 'bs_dec ':tune.choice([32,64,128,256])
         }
         
         # ray 초기화 및 실행
         if not ray.is_initialized():
-            os.environ['CUDA_VISIBLE_DEVICES'] = "1,2,3"
+            # os.environ['CUDA_VISIBLE_DEVICES'] = "2,3"
+            if args.dataset in ['ciao_timestamp','epinions']:
+                num_cpus=30
+            else:
+                num_cpus=15
             ray.init(
-                num_cpus=24, num_gpus=3,
+                # num_cpus=num_cpus, num_gpus=2,
+                num_cpus=num_cpus, num_gpus=4,
                 ignore_reinit_error=True)
             
         if args.decoder:
@@ -795,13 +844,13 @@ def main():
         part = 'full' if args.decoder else 'enc'
         now = datetime.datetime.now()
         now_str = now.strftime("%m%d_%H%M")
-        analysis = tune.run(run, config=search_space, num_samples=100,
+        analysis = tune.run(run, config=search_space, num_samples=50,
                         resources_per_trial={'cpu':4, 'gpu':1},
                         raise_on_failed_trial=False, 
                         checkpoint_freq=0,
                         storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
-                        name=f'{args.dataset}_{part}_{now_str}',
-                        # name=f'{args.dataset}_{part}_block_3',
+                        # name=f'{args.dataset}_{part}_{now_str}',
+                        name=f'{args.dataset}_{part}_bs_32',
                         metric=metric, mode=mode
                         )
                     
