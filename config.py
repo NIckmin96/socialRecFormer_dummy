@@ -2,8 +2,8 @@ ciao_timestamp={
          "model":{
             "enc_blocks":1, # fix
             "dec_blocks":3, # fix
-            "n_experts":6, # 마지막 튜닝
-            "topk":3, # 마지막 튜닝
+            "n_experts":5, # fix
+            "topk":2, # fix
             "num_heads":8,
             "d_model":64*8,
             "d_ffn":512, # fix
@@ -11,9 +11,9 @@ ciao_timestamp={
             "moe":True
          },
          "training":{
-            "weight_decay_enc":1e-1, # fix
-            "weight_decay_dec":8e-2, # fix
-            "lr_enc":4e-3, # fix
+            "weight_decay_enc":6e-2, # fix
+            "weight_decay_dec":3e-2, # fix
+            "lr_enc":2e-3, # fix
             "lr":9e-4, # fix
             "num_epochs":300,
             "bs_enc":32, # fix
@@ -25,8 +25,8 @@ epinions={
          "model":{
             "enc_blocks":1, # 고정
             "dec_blocks":3, # 고정
-            "n_experts":6, # tune.choice([5,6,7,8]),
-            "topk":2, # tune.sample_from(lambda spec:random.randint(2,spec.config['n_experts']-1)),
+            "n_experts":5, # fix
+            "topk":2, # fix
             "num_heads":8, # 고정
             "d_model":64*8, # 고정
             "d_ffn":512, # 고정
@@ -34,9 +34,9 @@ epinions={
             "moe":True
          },
          "training":{
-            "weight_decay_enc":5e-2, # fix
-            "weight_decay_dec":9e-2, # fix
-            "lr_enc":5e-3, # fix
+            "weight_decay_enc":2e-2, # fix
+            "weight_decay_dec":5e-2, # fix
+            "lr_enc":2e-3, # fix
             "lr":7e-4, # fix
             "num_epochs":300,
             "bs_enc":32, # fix
@@ -46,12 +46,12 @@ epinions={
 
 yelp={
          "model":{
-            "enc_blocks":1,
-            "dec_blocks":3,
-            "n_experts":2,
-            "topk":1,
+            "enc_blocks":1, # fix
+            "dec_blocks":3, 
+            "n_experts":5,
+            "topk":2,
             "num_heads":8,
-            "d_model":32*8,
+            "d_model":64*8,
             "d_ffn":512,
             "dropout": 0.3,
             "moe":True
@@ -63,7 +63,7 @@ yelp={
             "lr":7e-4,
             "num_epochs":300,
             "bs_enc":32,
-            "bs_dec":256
+            "bs_dec":32
          },
      }
 

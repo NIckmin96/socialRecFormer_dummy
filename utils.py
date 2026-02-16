@@ -193,18 +193,11 @@ class Metrics:
         _,rec_idx = torch.topk(logits, new_k)
         rec_items = items[rec_idx]
         rec_ratings = ratings[rec_idx]
-        # mask (ideal에 존재하는지 여부)
-        rowA = rec_items.unsqueeze(1)
-        rowB = ideal_items.unsqueeze(0)
-        mask = (rowA==rowB).any(dim=1)
-        rec_ratings *= mask
         # dcg/idcg/ndcg
         discount = torch.log2(torch.arange(new_k)+2)
         dcg = torch.sum(rec_ratings/discount, dim=-1)
         idcg = torch.sum(ideal_ratings/discount, dim=-1)
         ndcg = dcg/(idcg+1e-10).item()
-        # 보정
-        ndcg*=(new_k/k)
         return ndcg
     
     # def rank_metrics(self, items, logits, ratings, k=10):

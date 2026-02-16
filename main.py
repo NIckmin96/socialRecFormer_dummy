@@ -1,10 +1,10 @@
 import os
 import gc
+import math
+import resource
 import logging
 import argparse
-import random
 import datetime
-import pickle
 import time
 import pynvml
 from tqdm import tqdm
@@ -96,10 +96,12 @@ def train_encoder(device, model, optimizer, lr_scheduler, ds_iter, training_conf
             
             # RMSE
             sub_loss = metrics.RMSE(global_preference, batch['item_rating'], sub_mask)
+            
             # Huber Loss
-            # sub_loss = F.huber_loss(global_preference, batch['item_rating'], delta=1.0, reduction='none')
-            # sub_loss = sub_loss * sub_mask
-            # sub_loss = sub_loss.sum() / (sub_mask.sum() + 1e-8)
+            # sub_loss = F.huber_loss(global_preference, batch['item_rating'], delta=0.1, reduction='none')
+            
+            sub_loss = sub_loss * sub_mask
+            sub_loss = sub_loss.sum() / (sub_mask.sum() + 1e-8)
             
             sub_losses.update(sub_loss.item())
             
@@ -164,7 +166,7 @@ def valid_encoder(device, model, ds_iter, epoch, checkpoint_path, best_rmse, upd
 
     return eval_losses.avg, best_rmse, total_rmse, update_cnt
 
-def train(device, model, optimizer, lr_scheduler, ds_iter, training_config):
+def train(device, model, optimizer, lr_scheduler, ds_iter, training_config, alpha=6.5):
 
     # TODO: Epoch당 loss, RMSE, MAE 추적 => TensorBoard 또는 파일 저장을 통해 tracing할 수 있도록.
     logger.info("***** Running training *****")
@@ -197,30 +199,35 @@ def train(device, model, optimizer, lr_scheduler, ds_iter, training_config):
             output, global_preference = model(batch)
             
             main_mask = (batch['anchor_ratings'] != 0)
-            # MSE 
-            main_loss = metrics.MSE(output, batch['anchor_ratings'], main_mask)
+            
+            # # MSE 
+            # main_loss = metrics.MSE(output, batch['anchor_ratings'], main_mask)
             
             # Huber loss
-            # main_loss = F.huber_loss(output, batch['anchor_ratings'], delta=1.0, reduction='none')
-            # main_loss = main_loss * main_mask
-            # main_loss = main_loss.sum() / (main_mask.sum() + 1e-8)
+            main_loss = F.huber_loss(output, batch['anchor_ratings'], delta=0.1, reduction='none')
+            main_loss = main_loss * main_mask
+            main_loss = main_loss.sum() / (main_mask.sum() + 1e-8)
             
-            main_losses.update(main_loss.item())
+            main_losses.update(main_loss.item())            
             
-            # KLD /w mask
+            # Rank loss mask 생성
             fill_value = -1e9 
             masked_output = output.masked_fill(~main_mask, fill_value)
             masked_target = batch['anchor_ratings'].masked_fill(~main_mask, fill_value)
+            
+            # KLD
             rank_logit = F.log_softmax(masked_output, dim=-1).float()
             rank_target = F.softmax(masked_target, dim=-1)
-            # ORG
-            # rank_logit = F.log_softmax(output, dim=-1).float()
-            # rank_target = F.softmax(batch['anchor_ratings'], dim=-1)
             rank_loss = F.kl_div(rank_logit, rank_target, reduction='batchmean')
+            
+            # # InfoNCE 스타일의 Rank Loss
+            # rank_target_idx = torch.argmax(batch['anchor_ratings'], dim=-1)
+            # rank_loss = F.cross_entropy(masked_output / 0.5, rank_target_idx)
+            
             rank_losses.update(rank_loss.item())
             
     
-            loss = main_loss + rank_loss
+            loss = main_loss + rank_loss*alpha # best : (alpha = 6.5)
             # loss = main_loss
             losses.update(loss.item())
             
@@ -317,14 +324,15 @@ def valid(device, model, ds_iter, epoch, checkpoint_path, global_step, best_rmse
     output_df['targets'] = output_df['anchor_ratings'].map(lambda x:F.softmax(torch.tensor(x, dtype=torch.float), dim=-1))    
     output_df['ndcg'] = output_df.apply(lambda x:metrics.NDCG(x['anchor_items'], x['logits'], x['anchor_ratings'], 10), axis=1)
     output_df = output_df.dropna(how='any')
-    total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
+    total_ndcg = output_df['ndcg'].mean()
+    # total_ndcg = output_df[output_df['anchor_items'].apply(len)>=10]['ndcg'].mean()
     
      # 상대 개선 비율 계산
     ndcg_ratio = total_ndcg / best_ndcg if best_ndcg > 0 else 1.0
     rmse_ratio = best_rmse / total_rmse if total_rmse > 0 else 1.0
 
     # 조건 비교 (score 없이)
-    improved = (0.2 * ndcg_ratio + 0.8 * rmse_ratio) > 1.0
+    improved = (0.15 * ndcg_ratio + 0.85 * rmse_ratio) > 1.0
     
     if improved:
         best_ndcg = total_ndcg
@@ -457,23 +465,29 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+    
+def get_total_ram_gb():
+    pages = os.sysconf("SC_PHYS_PAGES")
+    page_size = os.sysconf("SC_PAGE_SIZE")
+    return (pages * page_size) / (1024 ** 3)
+
+def get_peak_ram_gb():
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 ** 2)
 
 def get_args():
                 
     parser = argparse.ArgumentParser(description='Transformer for Social Recommendation')
-    # parser.add_argument("--encoder", type=str2bool, default=False)
-    # parser.add_argument("--decoder", type=str2bool, default=True)
-    # parser.add_argument("--moe", type=str2bool, default=True)
-    # parser.add_argument("--eval", type = str2bool, default=False)
-    # parser.add_argument("--tune", type = str2bool, default=False)
     parser.add_argument("--encoder", action='store_true')
     parser.add_argument("--decoder", action='store_true')
     parser.add_argument("--moe", action='store_false')
     parser.add_argument("--eval", action='store_true')
     parser.add_argument("--tune", action='store_true')
+    parser.add_argument("--adaptive_tune", action='store_true')
     parser.add_argument("--device", type=str, default='single')
     parser.add_argument("--id", type=int, default=0)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--alpha', type=float, default=6.5)
+    parser.add_argument("--num_tunes", type=int, default=50)
     # dataset args
     parser.add_argument("--dataset", type = str, default="ciao_timestamp", help = "ciao, epinions")
     parser.add_argument("--test_ratio", type=float, default=0.2, help="percentage of valid/test dataset")
@@ -516,10 +530,20 @@ def run(config, checkpoint_dir=None):
     import torch, random, numpy as np # 함수 내부에서 import 해줘야 함
     
     os.chdir(Path(__file__).parent.resolve())
+    # if 'args_dict' in config:
+    #     args = argparse.Namespace(**config['args_dict'])
+    # else:
+    #     args = argparse.Namespace(**config)
+        
     if 'args_dict' in config:
         args = argparse.Namespace(**config['args_dict'])
+        for k,v in config.items():
+            if k=='args_dict':
+                continue
+            setattr(args, k, v)
     else:
         args = argparse.Namespace(**config)
+    #     setattr(args, 'alpha', 6.5)
     
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -576,9 +600,11 @@ def run(config, checkpoint_dir=None):
     model_config['moe'] = str2bool(args.moe)
     
     test_bs = 1024
+    # num_workers = 4 if args.dataset in ['ciao_timestamp', 'epinions'] else 0
+    num_workers = 8
     ds_iter = {
-            "train_enc":DataLoader(train_enc, batch_size = training_config['bs_enc'], shuffle=True, num_workers=4),
-            "train":DataLoader(train_ds, batch_size = training_config['bs_dec'], shuffle=True, num_workers=4),
+            "train_enc":DataLoader(train_enc, batch_size = training_config['bs_enc'], shuffle=True, num_workers=num_workers),
+            "train":DataLoader(train_ds, batch_size = training_config['bs_dec'], shuffle=True, num_workers=num_workers),
             "test_enc":DataLoader(test_enc, batch_size = test_bs, shuffle=False, num_workers=1),
             "test":DataLoader(test_ds, batch_size = test_bs, shuffle=False, num_workers=1)
             # "valid":DataLoader(valid_ds, batch_size = test_bs, shuffle=False, num_workers=1),
@@ -730,7 +756,7 @@ def run(config, checkpoint_dir=None):
             
             # Decoder Train
             # model.load_state_dict(best_model)
-            _ = train(device, model, opt_dec, lr_scheduler, ds_iter, training_config)
+            _ = train(device, model, opt_dec, lr_scheduler, ds_iter, training_config, args.alpha)
             checkpoint = torch.load(training_config['checkpoint_path'])
             model.load_state_dict(checkpoint['model_state_dict'])
             score, best_rmse, best_ndcg = eval(device, model, ds_iter)
@@ -775,16 +801,20 @@ def run(config, checkpoint_dir=None):
         print(training_config)
     
     if args.tune:
+        peak_ram_gb = get_peak_ram_gb()
+        
         if args.decoder:
             session.report({
                             'enc_rmse': enc_rmse.cpu().item(),
                             'score': score.cpu().item(),
                             'rmse': best_rmse.cpu().item(),
-                            'ndcg': best_ndcg.item()
+                            'ndcg': best_ndcg.item(),
+                            'peak_ram_gb': peak_ram_gb
                             })
         else:
             session.report({
-                            'enc_rmse': enc_rmse.cpu().item()
+                            'enc_rmse': enc_rmse.cpu().item(),
+                            'peak_ram_gb': peak_ram_gb
                             })
 
 def main():
@@ -802,36 +832,43 @@ def main():
         # parameters to Tune
         search_space = {
             'args_dict': args_dict,
-            # 'user_seq_len':tune.choice([20,30,40]),
+            # 'user_seq_len':30,
             # 'item_per_user':tune.choice([2,3,4,5,6]),
-            'enc_blocks': tune.choice([1,2,3]),
+            # 'enc_blocks': tune.choice([1,2,3]),
             # 'dec_blocks': tune.choice([1,2,3]),
-            # 'n_experts': tune.choice([5,6,7,8]),
+            # 'n_experts': tune.choice([5]),
             # 'topk': tune.sample_from(lambda spec:random.randint(2,spec.config['n_experts']-1)),
             # 'num_heads': tune.choice(list(np.arange(5,9))),
             # 'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*64])),
             # 'd_ffn': tune.choice([256, 512]),
             # 'dropout': tune.choice([0.1, 0.2, 0.3]),
-            'weight_decay_enc': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1,
-                                             0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]),
-            'lr_enc': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1,
-                                             0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]),
-            # 'weight_decay_dec': tune.choice([0.09]),
-            # 'lr': tune.choice([0.0007, 0.0008]),
+            'weight_decay_enc': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
+            'lr_enc': tune.choice([0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]),
+            'weight_decay_dec': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
+            'lr': tune.choice([0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008, 0.0009, 0.001]),
             # 'bs_enc':tune.choice([32,64,128]),
             # 'bs_dec ':tune.choice([32,64,128,256])
+            # 'moe': False,
+            # 'seed':tune.choice(list(range(50,100))),
+            # 'seed':tune.grid_search(list(range(50,75))),
+            # 'alpha':tune.choice(list(np.arange(5,10,0.5)))
         }
         
         # ray 초기화 및 실행
+        # if args.dataset in ['ciao_timestamp','epinions']:
+        #     num_cpus=30
+        # else:
+        #     num_cpus=15
+        num_cpus=30
+            
         if not ray.is_initialized():
-            # os.environ['CUDA_VISIBLE_DEVICES'] = "2,3"
-            if args.dataset in ['ciao_timestamp','epinions']:
-                num_cpus=30
-            else:
-                num_cpus=15
+            # gpu 비울때 사용
+            # gpu_idx = "1,2,3"
+            gpu_idx = "0,1,2,3"
+            num_gpus = len(gpu_idx.split(','))
+            os.environ['CUDA_VISIBLE_DEVICES'] = gpu_idx
             ray.init(
-                # num_cpus=num_cpus, num_gpus=2,
-                num_cpus=num_cpus, num_gpus=4,
+                num_cpus=num_cpus, num_gpus=num_gpus,
                 ignore_reinit_error=True)
             
         if args.decoder:
@@ -844,15 +881,75 @@ def main():
         part = 'full' if args.decoder else 'enc'
         now = datetime.datetime.now()
         now_str = now.strftime("%m%d_%H%M")
-        analysis = tune.run(run, config=search_space, num_samples=50,
-                        resources_per_trial={'cpu':4, 'gpu':1},
-                        raise_on_failed_trial=False, 
-                        checkpoint_freq=0,
-                        storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
-                        # name=f'{args.dataset}_{part}_{now_str}',
-                        name=f'{args.dataset}_{part}_bs_32',
-                        metric=metric, mode=mode
-                        )
+        
+        if args.adaptive_tune:
+            # pilot run을 통해서 trial 당 peak RAM 추정
+            estimated_trial_ram_gb = 16
+            pilot_samples = 2
+            pilot_analysis = tune.run(
+                run, config=search_space,
+                num_samples = pilot_samples,
+                resources_per_trial={'cpu':4, 'gpu':1},
+                max_concurrent_trials=1,
+                raise_on_failed_trial=False,
+                checkpoint_freq=0,
+                storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
+                name=f'{args.dataset}_{part}_{now_str}_pilot',
+                metric=metric,
+                mode=mode
+            )
+            
+            peak_list = []
+            for t in pilot_analysis.trials:
+                v = t.last_result.get('peak_ram_gb')
+                if v is not None and v>0:
+                    peak_list.append(float(v))
+                    
+            if len(peak_list)>0:
+                estimated_trial_ram_gb = max(peak_list)
+                
+            total_ram_gb = get_total_ram_gb()
+            safe_ram_gb = total_ram_gb * 0.8
+            max_by_ram = max(1, int(safe_ram_gb // estimated_trial_ram_gb))
+            max_by_gpu = 4
+            max_by_cpu_floor = num_cpus
+            max_concurrent_trials = max(1, min(max_by_ram, max_by_gpu, max_by_cpu_floor))
+            adaptive_cpu_per_trial = max(1, int(num_cpus // max_concurrent_trials))
+            
+            resource_per_trial = {
+                'cpu':adaptive_cpu_per_trial,
+                'gpu':1
+            }
+        
+            analysis = tune.run(run, config=search_space, num_samples=args.num_tunes,
+                            resources_per_trial=resource_per_trial,
+                            max_concurrent_trials=max_concurrent_trials,
+                            reuse_actors=True,
+                            raise_on_failed_trial=False, 
+                            checkpoint_freq=0,
+                            storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
+                            name=f'{args.dataset}_{part}_{now_str}',
+                            # name=f'{args.dataset}_{part}_seq_20',
+                            metric=metric, mode=mode
+                            )
+        else:
+            if args.dataset in ['ciao_timestamp', 'epinions']:
+                max_concurrent_trials = 4
+            else:
+                max_concurrent_trials = 2
+                
+            resource_per_trial = {'cpu':num_cpus//max_concurrent_trials, 'gpu':1}
+            analysis = tune.run(run, config=search_space, num_samples=50,
+                            resources_per_trial=resource_per_trial,
+                            max_concurrent_trials = max_concurrent_trials,
+                            reuse_actors=True,
+                            raise_on_failed_trial=False, 
+                            checkpoint_freq=0,
+                            storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
+                            name=f'{args.dataset}_{part}_{now_str}',
+                            # name=f'{args.dataset}_{part}_seq_30',
+                            metric=metric, mode=mode
+                            )
                     
         best_trial = analysis.get_best_trial(metric, mode=mode)
         print(f"\nBest trial: {best_trial.trial_id}")

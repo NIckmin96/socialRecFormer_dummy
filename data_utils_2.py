@@ -121,17 +121,17 @@ def add_degree(rating_df, trust_df):
 
 def shuffle_and_split_dataset(data_path:str, df_len, test, seed, regen):
     train_len = df_len-int(df_len*test)
-    valid_len = int(df_len*test)//2
-    test_len = valid_len
+    # valid_len = int(df_len*test)//2
+    test_len = int(df_len*test)
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
-    valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
+    # valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
     test_path = os.path.join(data_path, f'rating_test_seed_{seed}.csv')
 
     if os.path.isfile(train_path) & os.path.isfile(test_path) & (regen != 'all'):
         print("Loading Rating split sets...")
         rating_train_set = pd.read_csv(train_path)
-        rating_valid_set = pd.read_csv(valid_path)
+        # rating_valid_set = pd.read_csv(valid_path)
         rating_test_set = pd.read_csv(test_path)
         
     else:
