@@ -601,7 +601,7 @@ def run(config, checkpoint_dir=None):
     
     test_bs = 1024
     # num_workers = 4 if args.dataset in ['ciao_timestamp', 'epinions'] else 0
-    num_workers = 8
+    num_workers = 4
     ds_iter = {
             "train_enc":DataLoader(train_enc, batch_size = training_config['bs_enc'], shuffle=True, num_workers=num_workers),
             "train":DataLoader(train_ds, batch_size = training_config['bs_dec'], shuffle=True, num_workers=num_workers),
@@ -859,8 +859,8 @@ def main():
         #     num_cpus=30
         # else:
         #     num_cpus=15
-        num_cpus=30
             
+        num_cpus=30
         if not ray.is_initialized():
             # gpu 비울때 사용
             # gpu_idx = "1,2,3"
@@ -936,10 +936,10 @@ def main():
             if args.dataset in ['ciao_timestamp', 'epinions']:
                 max_concurrent_trials = 4
             else:
-                max_concurrent_trials = 2
+                max_concurrent_trials = 3
                 
-            resource_per_trial = {'cpu':num_cpus//max_concurrent_trials, 'gpu':1}
-            analysis = tune.run(run, config=search_space, num_samples=50,
+            resource_per_trial = {'cpu':num_cpus//(max_concurrent_trials+1) if args.dataset=='yelp' else num_cpus//max_concurrent_trials, 'gpu':1}
+            analysis = tune.run(run, config=search_space, num_samples=10,
                             resources_per_trial=resource_per_trial,
                             max_concurrent_trials = max_concurrent_trials,
                             reuse_actors=True,
