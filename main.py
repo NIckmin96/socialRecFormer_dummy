@@ -100,9 +100,6 @@ def train_encoder(device, model, optimizer, lr_scheduler, ds_iter, training_conf
             # Huber Loss
             # sub_loss = F.huber_loss(global_preference, batch['item_rating'], delta=0.1, reduction='none')
             
-            sub_loss = sub_loss * sub_mask
-            sub_loss = sub_loss.sum() / (sub_mask.sum() + 1e-8)
-            
             sub_losses.update(sub_loss.item())
             
             nn.utils.clip_grad_value_(model.encoder.parameters(), clip_value=1) # Gradient Clipping
@@ -204,9 +201,7 @@ def train(device, model, optimizer, lr_scheduler, ds_iter, training_config, alph
             # main_loss = metrics.MSE(output, batch['anchor_ratings'], main_mask)
             
             # Huber loss
-            main_loss = F.huber_loss(output, batch['anchor_ratings'], delta=0.1, reduction='none')
-            main_loss = main_loss * main_mask
-            main_loss = main_loss.sum() / (main_mask.sum() + 1e-8)
+            main_loss = F.huber_loss(output[main_mask], batch['anchor_ratings'][main_mask], delta=0.1)
             
             main_losses.update(main_loss.item())            
             
