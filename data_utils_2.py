@@ -27,8 +27,6 @@ def mat_to_csv(data_path:str, regen=False):
     
     else:
         print("Creating rating_df, trust_df...")
-        dataset_name = data_path.split('/')[-1]
-
         # original csv file
         rating_org = os.path.join(data_path, 'rating_org.csv')
         trust_org = os.path.join(data_path, 'trustnetwork_org.csv')
@@ -44,17 +42,11 @@ def mat_to_csv(data_path:str, regen=False):
         rating_df = rating_df.dropna(how='any')
         rating_df = rating_df.drop_duplicates(['user_id','product_id'], keep='first')
         rating_df = rating_df[rating_df.rating.between(1,5,inclusive='both')]
+        
         trust_df = trust_df.dropna(how='any')
         trust_df = trust_df.drop_duplicates(keep='first')
-        
-        # if dataset_name in ['yelp']:
-        #     # 1. user당 rating이 너무 적은 경우 제외
-        #     rating_df = rating_df.groupby('user_id').filter(lambda x: len(x) >= 10)
-        #     # trust를 기준으로 user를 sampling
-        #     trust_df = trust_df.sample(15000000, random_state=42, replace=False)
 
         print(f"***** Original Dataset Statistics *****")
-        print(f"# of users : {max(rating_df.user_id.max(), trust_df.user_id_1.max(), trust_df.user_id_2.max())}")
         print(f"# of users in rating df : {rating_df.user_id.nunique()}")
         print(f"# of items : {rating_df.product_id.nunique()}")
         print(f"# of interactions : {rating_df.shape[0]}")
@@ -64,12 +56,14 @@ def mat_to_csv(data_path:str, regen=False):
         rating_df = add_degree(rating_df, trust_df)
 
         # 전체 user-item rating 정보를 담은 rating matrix 생성
-        rating_matrix = sparse.lil_matrix((max(rating_df['user_id'].unique())+1, max(rating_df['product_id'].unique())+1), dtype=np.ubyte)
-
-        for index in rating_df.index:
-            rating_matrix[rating_df['user_id'][index], rating_df['product_id'][index]] = rating_df['rating'][index]
-            
-        rating_matrix = rating_matrix.tocsr()
+        n_users = int(rating_df['user_id'].max())+1
+        n_items = int(rating_df['product_id'].max())+1
+        
+        rows = rating_df['user_id'].to_numpy(dtype=np.int32)
+        cols = rating_df['product_id'].to_numpy(dtype=np.int32)
+        vals = rating_df['rating'].to_numpy(dtype=np.uint8)
+        
+        rating_matrix = sparse.coo_matrix((vals, (rows, cols)), shape=(n_users, n_items), dtype=np.uint8).tocsr()
         sparse.save_npz(os.path.join(data_path, 'rating_matrix.npz'), rating_matrix) # csr matrix 형태로 저장
 
         rating_df.to_csv(data_path + '/rating.csv', index=False)
@@ -110,19 +104,33 @@ def reset_and_filter_data(rating_df:pd.DataFrame, trust_df:pd.DataFrame) -> pd.D
     return rating_df, trust_df
 
 def add_degree(rating_df, trust_df):
-    rating_g = nx.from_pandas_edgelist(rating_df, 'user_id', 'product_id')
-    social_g = nx.from_pandas_edgelist(trust_df, 'user_id_1', 'user_id_2')
-    social_degree = {user:social_g.degree(user) for user in social_g.nodes()}
+    rating_df = rating_df.copy()
     
-    rating_df['product_degree'] = rating_df['product_id'].map(lambda x:len(list(rating_g.neighbors(x))))
-    rating_df['user_degree'] = rating_df['user_id'].map(lambda x:social_degree.get(x,0))
+    product_degree = rating_df.groupby('product_id')['user_id'].nunique()
+    rating_df['product_degree'] = rating_df['product_id'].map(product_degree).astype('int32')
+    
+    edges = trust_df[['user_id_1','user_id_2']].copy()
+    u = edges[['user_id_1','user_id_2']].min(axis=1)
+    v = edges[['user_id_1','user_id_2']].max(axis=1)
+    undirected_edges = pd.DataFrame({'u':u, 'v':v}).drop_duplicates()
+    
+    user_degree = pd.concat([undirected_edges['u'], undirected_edges['v']], ignore_index=True).value_counts(sort=False)
+    
+    rating_df['user_degree'] = rating_df['user_id'].map(user_degree).fillna(0).astype('int32')
+    
+    # rating_g = nx.from_pandas_edgelist(rating_df, 'user_id', 'product_id')
+    # social_g = nx.from_pandas_edgelist(trust_df, 'user_id_1', 'user_id_2')
+    # social_degree = {user:social_g.degree(user) for user in social_g.nodes()}
+    
+    # rating_df['product_degree'] = rating_df['product_id'].map(lambda x:len(list(rating_g.neighbors(x))))
+    # rating_df['user_degree'] = rating_df['user_id'].map(lambda x:social_degree.get(x,0))
     return rating_df
 
 
 def shuffle_and_split_dataset(data_path:str, df_len, test, seed, regen):
-    train_len = df_len-int(df_len*test)
+    # train_len = df_len-int(df_len*test)
     # valid_len = int(df_len*test)//2
-    test_len = int(df_len*test)
+    # test_len = int(df_len*test)
     
     train_path = os.path.join(data_path, f'rating_train_seed_{seed}.csv')
     # valid_path = os.path.join(data_path, f'rating_valid_seed_{seed}.csv')
@@ -137,7 +145,7 @@ def shuffle_and_split_dataset(data_path:str, df_len, test, seed, regen):
     else:
         rating_df = pd.read_csv(data_path + '/rating.csv', index_col=[])
         rating_df = rating_df.drop_duplicates(subset=['user_id','product_id'],keep='first')
-        split_rating_df = shuffle(rating_df, random_state=1)
+        split_rating_df = shuffle(rating_df, random_state=seed)
         num_test = int(len(split_rating_df)*test)
         print("num test :", num_test)
         
@@ -155,8 +163,7 @@ def shuffle_and_split_dataset(data_path:str, df_len, test, seed, regen):
         # rating_valid_set.to_csv(data_path + f'/rating_valid_seed_{seed}.csv', index=False)
         # rating_train_set.to_csv(data_path + f'/rating_train_seed_{seed}.csv', index=False)
     
-    return rating_train_set, rating_valid_set, rating_test_set
-    # return rating_train_set, rating_test_set
+    # return rating_train_set, rating_valid_set, rating_test_set
 
 def generate_social_dataset(data_path, split, rating_split, trust_df, seed, regen):
     """
@@ -164,9 +171,9 @@ def generate_social_dataset(data_path, split, rating_split, trust_df, seed, rege
     """
     social_file = os.path.join(data_path, f'trustnetwork_{split}_seed_{seed}.csv')
     rating_file = os.path.join(data_path, f'rating_{split}_seed_{seed}.csv')
-    if (not os.path.isfile(social_file)) or (regen=='all'):
+    if (not os.path.isfile(social_file)) or (not os.path.isfile(rating_file)) or (regen=='all'):
         print(f"Creating Social {split} split sets...\n")
-        users = rating_split['user_id'].unique()            
+        users = set(rating_split['user_id'])
         social_split = trust_df[(trust_df['user_id_1'].isin(users)) & (trust_df['user_id_2'].isin(users))]
 
         # save
@@ -183,55 +190,63 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
     # rating split -> social split : rating에 존재하는 user를 기준으로 social split 생성 
     # social split -> social graph : social split을 기준으로 graph 생성 -> graph의 전체 node를 순회하면서 random walk 생성 -> rating안에 존재하는 user가 아닌 경우에 item이 붙을 수가 없음 -> 불필요한 데이터 생성 -> rating 기준이 맞음!!
     # experiment : social node 전체 순회 vs rating split user node기준 순회
-    social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
-    anchor_nodes = list(social_graph.nodes())*augs
+    num_nodes = pd.unique(pd.concat([social_split['user_id_1'], social_split['user_id_2']], ignore_index=True)).size
+    num_anchors = num_nodes*augs
         
     # save dir 지정
     # all, rw, total
-    file_path = os.path.join(data_path, f"rw_rating_length_{walk_length}_{len(anchor_nodes)}_split_{split}_seed_{data_split_seed}.csv")
+    file_path = os.path.join(data_path, f"rw_rating_length_{walk_length}_{num_anchors}_split_{split}_seed_{data_split_seed}.csv")
     print("Random Walk file dir :", file_path)
     # 이미 random walk 존재하는 경우 return
-    if os.path.isfile(file_path) & (regen in ['no','total','train']):
+    if os.path.isfile(file_path) and (regen in ['no','total','train']):
         print(f"Loading {split} random walk sequence file...")
         df = pd.read_csv(file_path)
     # 새로 생성 or regen
     else:
-        user_degree_dic = rating_split.groupby('user_id')['user_degree'].unique().map(lambda x:int(x[0])).to_dict()        
+        social_graph = nx.from_pandas_edgelist(social_split, source='user_id_1', target='user_id_2')
+        anchor_nodes = list(social_graph.nodes())
+        total_steps = len(anchor_nodes)*augs
+        # Cache adjacency once to avoid repeated set/list allocations in find_next_node.
+        adj = {node: tuple(social_graph.neighbors(node)) for node in anchor_nodes}
+        user_degree_dic = rating_split[['user_id','user_degree']].drop_duplicates('user_id').set_index('user_id')['user_degree'].to_dict()
         anchor_seq_degree = []
         # seq_set = set()
         print(f"{split} random walk sequence file doesn't exist!")
         print(f"Creating {split} random walk sequence...")
-        for node in tqdm(anchor_nodes, desc="Generating random walk sequence..."):
-            # if anchor_cnt[node]==per_user:
-            #     continue
-            seqs = [node]
-            wl = 1
-            thres=0
-            while wl<walk_length:
-                # 처음 : random next node 추출 후, append
-                if wl == 1:
-                    next_node = find_next_node(social_graph, previous_node=None, current_node=node)
-                # 처음이 아닌 경우
-                else:
-                    next_node = find_next_node(social_graph, previous_node=seqs[-2], current_node=seqs[-1])
-                    # 중복 노드가 존재하는 경우, 제외하고 random choice
-                    if next_node in seqs:
-                        if thres<5:
-                            thres+=1
-                            continue
+        with tqdm(total=total_steps, desc="Generating random walk sequence...") as pbar:
+            for _ in range(augs):
+                for node in anchor_nodes:
+                    seqs = [node]
+                    seen = {node} # 중복 체크를 위한 set
+                    wl = 1
+                    thres=0
+                    while wl<walk_length:
+                        # 처음 : random next node 추출 후, append
+                        if wl == 1:
+                            next_node = find_next_node(adj, previous_node=None, current_node=node)
+                        # 처음이 아닌 경우
                         else:
-                            next_node = 0
-                            # available = set(social_graph.nodes())-set(seqs)
-                            # if available:
-                            #     next_node = np.random.choice(list(available))
+                            next_node = find_next_node(adj, previous_node=seqs[-2], current_node=seqs[-1])
+                            # 중복 노드가 존재하는 경우, 제외하고 random choice
+                            if next_node in seen:
+                                if thres < 5:
+                                    thres += 1
+                                    continue
+                                else:
+                                    next_node = 0
+                                    # available = set(social_graph.nodes())-set(seqs)
+                                    # if available:
+                                    #     next_node = np.random.choice(list(available))
 
-                # next node 추가 후, walk length 하나 올림
-                seqs.append(next_node)
-                wl += 1
-            
-            # anchor_cnt[node]+=1
-            degrees = [0 if node==0 else user_degree_dic.get(node, 0) for node in seqs]
-            anchor_seq_degree.append([node,seqs,degrees])
+                        # next node 추가 후, walk length 하나 올림
+                        seqs.append(next_node)
+                        seen.add(next_node)
+                        wl += 1
+                
+                    # anchor_cnt[node]+=1
+                    degrees = [0 if node==0 else user_degree_dic.get(node, 0) for node in seqs]
+                    anchor_seq_degree.append([node,seqs,degrees])
+                    pbar.update(1)
 
         # revised
         df = pd.DataFrame(anchor_seq_degree,columns=['user_id','random_walk_seq','degree'])
@@ -244,7 +259,7 @@ def generate_social_random_walk_sequence(data_path, rating_split, social_split, 
     return df
 
 
-def find_next_node(input_G, previous_node, current_node): 
+def find_next_node(adj, previous_node, current_node): 
     '''
     - previosu_node가 None인(sequence의 길이가 1인) 경우에, current_node의 neighbor node를 후보로 삼고 동일하게 1/n의 확률로 next_node를 random select
     - 그렇지 않은 경우, current_node의 neighbor에서 previous node를 제외한 node를 neighbor로 삼고,
@@ -253,36 +268,28 @@ def find_next_node(input_G, previous_node, current_node):
         - previous node로 돌아갈 확률 = 1/(n+max(n,2))
         - previous node를 제외한 다른 노드가 선택될 확률 = (1- previous node가 선택될 확률)/(n)
     '''
-    if previous_node!=None:
-        if current_node in input_G.nodes():
-            neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
-        else: # current_node == 0
+    if previous_node is not None:
+        if current_node == 0:
             return 0
-        
-        n = len(neighbors)
-        if n==0:
-            # return np.random.choice(input_G.nodes()).item()
-            return 0
-        
-        return_prob = 1/(n+max(n,2))
-        edge_prob = (1-return_prob)/n
-        # 정규화(sum=1)
-        _sum = return_prob+n*edge_prob
-        return_prob /= _sum
-        edge_prob /= _sum
 
-        candidates = neighbors + [previous_node]
-        probs = [edge_prob for _ in range(n)]+[return_prob]
-        
+        neighbors = adj.get(current_node, ())
+        candidates = [node for node in neighbors if node != previous_node]
+        n = len(candidates)
+        if n == 0:
+            return 0
+
+        return_prob = 1 / (n + max(n, 2))
+        edge_prob = (1 - return_prob) / n
+        probs = [edge_prob for _ in range(n)] + [return_prob]
+        candidates = candidates + [previous_node]
+
     else:
-        if current_node in input_G.nodes():
-            neighbors = list(set(input_G.neighbors(current_node))-{previous_node})
-        else:
-            neighbors = list(set(input_G.nodes())-{current_node})
-        n = len(neighbors)
-        
-        edge_prob = 1/n
-        candidates = neighbors
+        candidates = adj.get(current_node, ())
+        n = len(candidates)
+        if n == 0:
+            return 0
+
+        edge_prob = 1 / n
         probs = [edge_prob for _ in range(n)]
 
     selected_node = np.random.choice(candidates, p=probs).item()
@@ -305,7 +312,11 @@ def remove_duplicated_social_random_walk_sequence(random_walk_train:pd.DataFrame
 
     return random_walk_train, random_walk_valid, random_walk_test
     
-def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic, product_degree_dic, rating_matrix, seed, split, random_walk_len, item_per_user, min_item_len, regen, neg, used_pairs:dict={}):
+def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic, product_degree_dic, rating_matrix, seed, split, random_walk_len, item_per_user, min_item_len, regen, neg, used_pairs=None):
+    
+    if used_pairs==None:
+        used_pairs={}
+        
     item_seq_len = random_walk_len*item_per_user
     # test set augmentation 여부 확인
     if neg==True:
@@ -326,12 +337,13 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         print(f"Creating {split} total df(input_sequence_data)...")
         print(f"total df dir : {total_path}")
         
-        if split=='train':
-            used_pairs = {user:set() for user in rating_split.user_id.unique()}
+        # if split=='train':
+        #     used_pairs = {user:set() for user in rating_split.user_id.unique()}
+        
+        # filtered_items = {user:list(set(items)-used_pairs.get(user,set())) for user,items in interacted_items.items()}
 
         rating_lookup = {(row.user_id,row.product_id):row.rating for row in rating_split.itertuples(index=False)}
         interacted_items = rating_split.groupby('user_id')['product_id'].unique().to_dict()
-        filtered_items = {user:list(set(items)-used_pairs.get(user,set())) for user,items in interacted_items.items()}
         
         def str_to_list(x):
             if type(x)==str:
@@ -381,44 +393,47 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
             
             return total_ratings
         
+        all_items = np.arange(1, rating_matrix.shape[1], dtype=np.int32)
+
         def add_negs(user_id, anchor_items):
-            all_items = list(range(1,rating_matrix.shape[1])) # 전체 item
-            anchor_items = list(set(anchor_items)-set([0])) # 0(interaction item이 아무것도 없는 경우 넣은 값) 제거
-            nnz = rating_matrix[user_id].indices # user에 대해서 Nonzero인 item list
-            zero_indices = np.setdiff1d(all_items, nnz) # zero인 item index list
-            n = len(anchor_items) # positive item의 개수
-            n_samples = max(10-n, n) # negative item의 개수 = @k의 수보다 많아야함
-            ########################### [dev] ###########################
-            if n+n_samples>item_seq_len:
-                if n==n_samples:
-                    anchor_items = list(np.random.choice(anchor_items, size=item_seq_len//2, replace=False))
-                    neg_samples = list(np.random.choice(zero_indices, size=item_seq_len//2, replace=False))
+            anchor_items = list(set(anchor_items) - {0})
+            nnz = rating_matrix[user_id].indices
+            zero_indices = np.setdiff1d(all_items, nnz, assume_unique=False)
+
+            n_pos = len(anchor_items)
+            n_neg = max(10 - n_pos, n_pos)
+
+            if n_pos + n_neg > item_seq_len:
+                if n_pos == n_neg:
+                    keep_pos = min(n_pos, item_seq_len // 2)
+                    if keep_pos > 0:
+                        anchor_items = np.random.choice(anchor_items, size=keep_pos, replace=False).tolist()
+                    else:
+                        anchor_items = []
+                    n_neg = item_seq_len - len(anchor_items)
                 else:
-                    neg_samples = list(np.random.choice(zero_indices, size=n+n_samples-item_seq_len, replace=False))
+                    n_neg = n_pos + n_neg - item_seq_len
+
+            n_neg = min(max(n_neg, 0), len(zero_indices))
+            if n_neg > 0:
+                neg_samples = np.random.choice(zero_indices, size=n_neg, replace=False).tolist()
             else:
-                neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))
-                
+                neg_samples = []
+
             anchor_items.extend(neg_samples)
-            assert len(anchor_items)<=item_seq_len
-            ########################### [dev] ###########################
-            
-            ########################### [ORG] ###########################
-            # neg_samples = list(np.random.choice(zero_indices, size=n_samples, replace=False))                
-            # anchor_items.extend(neg_samples)
-            
-            # np.random.shuffle(anchor_items)
-            
-            # assert len(anchor_items)>=10
-            ########################### [ORG] ###########################
-            return pd.Series({'anchor_items':list(anchor_items),
-                              'neg_samples':list(neg_samples)})
+            anchor_items = anchor_items[:item_seq_len]
+
+            return {'anchor_items': anchor_items,
+                    'neg_samples': neg_samples}
                     
         # str type으로 저장된 데이터 list로 변환 
         tqdm.pandas()
         total_df = pd.DataFrame()
         print("Processing Default information ...")
-        total_df['user_sequences'] = rw_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
-        total_df['user_degree'] = rw_df.apply(lambda x: str_to_list(x['degree']), axis=1)
+        total_df['user_sequences'] = rw_df['random_walk_seq'].map(str_to_list)
+        # total_df['user_sequences'] = rw_df.apply(lambda x: str_to_list(x['random_walk_seq']), axis=1)
+        total_df['user_degree'] = rw_df['degree'].map(str_to_list)
+        # total_df['user_degree'] = rw_df.apply(lambda x: str_to_list(x['degree']), axis=1)
         total_df['item_sequences'] = total_df['user_sequences'].progress_map(map_user_items) # item mapping + 이전 split에서 사용한 pair 제거
         total_df['item_degree'] = total_df['item_sequences'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
         
@@ -431,22 +446,31 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         total_df = total_df.explode(['item_sequences','item_degree'])
         # rating matrix
         # total_df['item_rating'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['user_sequences'],:][:,x['item_sequences']].toarray()), axis=1)
-        total_df['item_rating'] = total_df.progress_apply(lambda x:get_ratings(x['user_sequences'], x['item_sequences']), axis=1)
-        total_df['anchor_user'] = total_df['user_sequences'].progress_map(lambda x:x[0])
-        total_df['anchor_degree'] = total_df['anchor_user'].progress_map(lambda x:user_degree_dic[x])
-        # total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:filtered_items[x] if len(filtered_items[x])>0 else None)
-        total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:interacted_items[x])
+        pairs = zip(total_df['user_sequences'].tolist(), total_df['item_sequences'].tolist())
+        total_df['item_rating'] = [get_ratings(u_seq, i_seq) for u_seq, i_seq in tqdm(pairs, total=len(total_df), desc="item_rating")]
+        # total_df['item_rating'] = total_df.progress_apply(lambda x:get_ratings(x['user_sequences'], x['item_sequences']), axis=1)
+        # total_df['anchor_user'] = total_df['user_sequences'].progress_map(lambda x:x[0])
+        # total_df['anchor_degree'] = total_df['anchor_user'].progress_map(lambda x:user_degree_dic[x])
+        # total_df['anchor_items'] = total_df['anchor_user'].progress_map(lambda x:interacted_items[x])
+        total_df['anchor_user'] = total_df['user_sequences'].str[0]
+        total_df['anchor_degree'] = total_df['anchor_user'].map(user_degree_dic)
+        total_df['anchor_items'] = total_df['anchor_user'].map(lambda user: list(interacted_items.get(user, [])))
+        total_df = total_df[total_df['anchor_items'].map(len) > 0].reset_index(drop=True)
         print("1. anchor item len :", total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
         # train/valid/test 중 Minimum보다 큰 경우, random sample [tmp]
         total_df['anchor_items'] = total_df['anchor_items'].progress_map(lambda x:np.random.choice(x, min(len(x),min_item_len), replace=False).tolist())
         print("2. anchor item len :",total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
         
         # iteraction item 아무것도 없는 경우 drop
-        total_df.dropna(subset='anchor_items', inplace=True)
+        # total_df.dropna(subset='anchor_items', inplace=True)
         # negative sampling
         if neg:
             print("Negative Sampling...")
-            total_df[['anchor_items','neg_samples']] = total_df[['anchor_user','anchor_items']].progress_apply(lambda x:add_negs(x['anchor_user'],x['anchor_items']), axis=1)
+            neg_pairs = zip(total_df['anchor_user'].tolist(), total_df['anchor_items'].tolist())
+            neg_out = [add_negs(u, items) for u, items in tqdm(neg_pairs, total=len(total_df), desc="neg_sampling")]
+            neg_df = pd.DataFrame(neg_out)  # add_negs가 dict 반환하도록 바꾸면 더 깔끔
+            total_df[['anchor_items', 'neg_samples']] = neg_df[['anchor_items', 'neg_samples']]
+            # total_df[['anchor_items','neg_samples']] = total_df[['anchor_user','anchor_items']].progress_apply(lambda x:add_negs(x['anchor_user'],x['anchor_items']), axis=1)
         print("3. anchor item len :",total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
         total_df['anchor_item_degree'] = total_df['anchor_items'].progress_map(lambda seq:list(map(lambda x:product_degree_dic.get(x,0), seq)))
         # slice and pad
@@ -459,7 +483,10 @@ def generate_input_sequence_data(data_path, rw_df, rating_split, user_degree_dic
         print("4. anchor item len :",total_df['anchor_items'].apply(len).max(), total_df['anchor_items'].apply(len).min())
         # total_df = total_df.explode(['anchor_items','anchor_item_degree'])
         # rating matrix
-        total_df['anchor_ratings'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['anchor_user'],:][:,x['anchor_items']].toarray()), axis=1)        
+        # total_df['anchor_ratings'] = total_df.progress_apply(lambda x:torch.FloatTensor(rating_matrix[x['anchor_user'],:][:,x['anchor_items']].toarray()), axis=1)        
+        a_pairs = zip(total_df['anchor_user'].tolist(), total_df['anchor_items'].tolist())
+        total_df['anchor_ratings'] = [torch.FloatTensor(rating_matrix[u, :][:, items].toarray())
+            for u, items in tqdm(a_pairs, total=len(total_df), desc="anchor_ratings")]
         
         if neg:
             total_df = total_df[['user_sequences','user_degree','item_sequences','item_degree','item_rating',

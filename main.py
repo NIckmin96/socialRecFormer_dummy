@@ -329,7 +329,8 @@ def valid(device, model, ds_iter, epoch, checkpoint_path, global_step, best_rmse
     # 조건 비교 (score 없이)
     improved = (0.15 * ndcg_ratio + 0.85 * rmse_ratio) > 1.0
     
-    if improved:
+    # if improved:
+    if best_rmse > total_rmse:
         best_ndcg = total_ndcg
         best_rmse = total_rmse
         best_model = model.state_dict()
@@ -827,7 +828,7 @@ def main():
         # parameters to Tune
         search_space = {
             'args_dict': args_dict,
-            # 'user_seq_len':30,
+            'user_seq_len':15,
             # 'item_per_user':tune.choice([2,3,4,5,6]),
             # 'enc_blocks': tune.choice([1,2,3]),
             # 'dec_blocks': tune.choice([1,2,3]),
@@ -837,14 +838,14 @@ def main():
             # 'd_model': tune.sample_from(lambda spec:random.choice([spec.config['num_heads']*64])),
             # 'd_ffn': tune.choice([256, 512]),
             # 'dropout': tune.choice([0.1, 0.2, 0.3]),
-            'weight_decay_enc': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
-            'lr_enc': tune.choice([0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]),
-            'weight_decay_dec': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
-            'lr': tune.choice([0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008, 0.0009, 0.001]),
+            # 'weight_decay_enc': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
+            # 'lr_enc': tune.choice([0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]),
+            # 'weight_decay_dec': tune.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]),
+            # 'lr': tune.choice([0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008, 0.0009, 0.001]),
             # 'bs_enc':tune.choice([32,64,128]),
             # 'bs_dec ':tune.choice([32,64,128,256])
             # 'moe': False,
-            # 'seed':tune.choice(list(range(50,100))),
+            'seed':tune.choice(list(range(50,100))),
             # 'seed':tune.grid_search(list(range(50,75))),
             # 'alpha':tune.choice(list(np.arange(5,10,0.5)))
         }
@@ -859,12 +860,18 @@ def main():
         if not ray.is_initialized():
             # gpu 비울때 사용
             # gpu_idx = "1,2,3"
-            gpu_idx = "0,1,2,3"
+            if args.dataset=='yelp':
+                gpu_idx = "3"
+            else:
+                gpu_idx = "0,1,2,3"
             num_gpus = len(gpu_idx.split(','))
             os.environ['CUDA_VISIBLE_DEVICES'] = gpu_idx
             ray.init(
-                num_cpus=num_cpus, num_gpus=num_gpus,
-                ignore_reinit_error=True)
+                num_cpus=num_cpus, 
+                num_gpus=num_gpus,
+                object_store_memory=10 * 1024**3, # 10GB로 제한
+                ignore_reinit_error=True
+            )
             
         if args.decoder:
             metric = 'score'
@@ -931,18 +938,19 @@ def main():
             if args.dataset in ['ciao_timestamp', 'epinions']:
                 max_concurrent_trials = 4
             else:
-                max_concurrent_trials = 3
+                max_concurrent_trials = 2
                 
-            resource_per_trial = {'cpu':num_cpus//(max_concurrent_trials+1) if args.dataset=='yelp' else num_cpus//max_concurrent_trials, 'gpu':1}
+            resource_per_trial = {'cpu':16 if args.dataset=='yelp' else num_cpus//(max_concurrent_trials), 'gpu':1}
             analysis = tune.run(run, config=search_space, num_samples=10,
                             resources_per_trial=resource_per_trial,
                             max_concurrent_trials = max_concurrent_trials,
-                            reuse_actors=True,
+                            reuse_actors=False if args.dataset=='yelp' else True,
                             raise_on_failed_trial=False, 
+                            max_failures=5,
                             checkpoint_freq=0,
                             storage_path='/home/mlsys/workspace/BK/socialRecFormer_dummy/ray_results',
-                            name=f'{args.dataset}_{part}_{now_str}',
-                            # name=f'{args.dataset}_{part}_seq_30',
+                            # name=f'{args.dataset}_{part}_{now_str}',
+                            name=f'{args.dataset}_{part}_seq_10',
                             metric=metric, mode=mode
                             )
                     

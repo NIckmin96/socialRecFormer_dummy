@@ -57,13 +57,13 @@ yelp={
             "moe":True
          },
          "training":{
-            "weight_decay_enc":5e-2,
-            "weight_decay_dec":9e-2,
+            "weight_decay_enc":4e-2,
+            "weight_decay_dec":4e-2,
             "lr_enc":5e-3,
-            "lr":7e-4,
+            "lr":3e-4,
             "num_epochs":300,
-            "bs_enc":32,
-            "bs_dec":32
+            "bs_enc":64,
+            "bs_dec":64
          },
      }
 
