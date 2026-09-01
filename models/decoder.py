@@ -12,11 +12,16 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.user_embed = user_embed
         self.item_embed = item_embed
-        
-        if moe:
-            moe_ffn = SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
-        else:
-            moe_ffn = FeedForwardNetwork(d_model, d_ffn, dropout)
+
+        # Pre-LN 구조에서 마지막 블록 출력의 residual stream을 안정화하기 위한 최종 정규화
+        self.final_norm = nn.LayerNorm(d_model)
+
+        def make_moe_ffn():
+            # 블록마다 독립된 MoE/FFN 파라미터를 갖도록 매번 새로 생성
+            if moe:
+                return SparseMoE(d_model, d_ffn, n_experts, topk, dropout)
+            else:
+                return FeedForwardNetwork(d_model, d_ffn, dropout)
 
         self.dec_layers = nn.ModuleList(
             [DecoderLayer(
@@ -25,7 +30,7 @@ class Decoder(nn.Module):
                 d_model = d_model,
                 num_heads = num_heads,
                 dropout = dropout,
-                moe = moe_ffn
+                moe = make_moe_ffn()
             ) for _ in range(num_layers)]
         )
     
@@ -40,9 +45,12 @@ class Decoder(nn.Module):
         # Decoder layer forward pass (MHA, FFN)
         for layer in self.dec_layers:
             x_item, attention, enc_output = layer(x_item, enc_output, item_mask, item_user_mask)
-            
+
         self.user_reptn = enc_output
-        
+
+        # 마지막 블록 이후 최종 정규화 (item representation stream)
+        x_item = self.final_norm(x_item)
+
         # MF
         enc_output = enc_output[:,0,:].unsqueeze(1)
         output = torch.matmul(enc_output, x_item.transpose(2,1)).squeeze(1)

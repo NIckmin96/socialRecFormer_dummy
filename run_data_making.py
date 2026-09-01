@@ -1,25 +1,27 @@
 import subprocess
-import requests
-import json
-from datetime import datetime
-import os
-import torch
 
-seed = ["42"]
-datasets = ['ciao']
-user_item = [(30,100)]
+# Standalone data-prep runner. Matches data_making.py::_get_args (the unified pipeline
+# that main.py also drives via dm.DatasetMaking).
+seeds = ["42"]
+datasets = ["ciao"]
+# (user_seq_len = random walk length, item_per_user)
+user_item = [(30, 5)]
+augs = "1"
+regen = "all"          # no | all | rw | total | train
 
-#python3 data_making.py --dataset "$DATASET" --first True --seed 42 --test_ratio 0.1 --random_walk_len "$RANDOM_WALK_LEN" --item_seq_len "$ITEM_SEQ_LEN"
-rps = ['1']
-for s in seed:
+for s in seeds:
     for d in datasets:
-        for (u, i) in user_item:
-            for rp in rps:
-                path = f"./dataset/{d}/sequence_data_seed_{s}_walk_{u}_itemlen_{i}_rp_{rp}_.pkl"
-                print(path)
-                if not os.path.isfile(path):
-                    torch.cuda.empty_cache()
-                    subprocess.run(['python', 'data_making.py', '--seed', s, '--dataset', d, '--random_walk_len', str(u), '--item_seq_len', str(i), '--return_params', rp])
-                    torch.cuda.empty_cache()
-                else:
-                    print(f"Exists!")
+        for (usl, ipu) in user_item:
+            cmd = [
+                "python", "data_making.py",
+                "--dataset", d,
+                "--seed", s,
+                "--regen", regen,
+                "--user_seq_len", str(usl),
+                "--item_per_user", str(ipu),
+                "--augs", augs,
+                # "--neg",            # uncomment to add negatives to the train target set
+                # "--drop_cold_eval", # uncomment to exclude cold (0 train interaction) anchors from valid/test
+            ]
+            print(" ".join(cmd))
+            subprocess.run(cmd, check=True)

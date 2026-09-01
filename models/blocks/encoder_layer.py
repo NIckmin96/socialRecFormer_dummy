@@ -14,7 +14,7 @@ class EncoderLayer(nn.Module):
 
         # self.self_norm = nn.BatchNorm1d(user_seq_len)
         self.self_norm = nn.LayerNorm(d_model)
-        self.self_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
+        self.self_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads, dropout=dropout)
         self.self_dropout = nn.Dropout(p=dropout)
 
         # self.norm_moe1 = nn.BatchNorm1d(user_seq_len)
@@ -25,7 +25,7 @@ class EncoderLayer(nn.Module):
         self.prefer_norm = nn.LayerNorm(d_model)
         # self.prefer_norm_item = nn.BatchNorm1d(item_seq_len)
         self.prefer_norm_item = nn.LayerNorm(d_model)
-        self.prefer_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
+        self.prefer_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads, dropout=dropout)
         self.prefer_dropout = nn.Dropout(p=dropout)
 
         # self.norm_moe2 = nn.BatchNorm1d(user_seq_len)
@@ -44,8 +44,9 @@ class EncoderLayer(nn.Module):
         # 2. user-item attention(여기서 global rating prediction ouptut으로 뽑을수있게)
         residual = x
         x = self.prefer_norm(x)
-        x_item = self.prefer_norm_item(x_item)
-        x, attention = self.prefer_attention(Q=x, K=x_item, V=x_item, mask=preference_mask)
+        # x_item은 다음 블록에도 원본 그대로 전달되어야 하므로, 정규화는 지역 변수에만 적용
+        x_item_normed = self.prefer_norm_item(x_item)
+        x, attention = self.prefer_attention(Q=x, K=x_item_normed, V=x_item_normed, mask=preference_mask)
         x = self.prefer_dropout(x)
         x = x + residual
         

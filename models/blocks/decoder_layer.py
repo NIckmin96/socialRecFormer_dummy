@@ -15,7 +15,7 @@ class DecoderLayer(nn.Module):
         # Self attention
         self.norm_self = nn.LayerNorm(d_model)
         # self.norm_self = nn.BatchNorm1d(item_seq_len)
-        self.attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
+        self.attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads, dropout=dropout)
         self.dropout_self = nn.Dropout(p=dropout)
         # self attention - moe
         self.norm_self_moe = nn.LayerNorm(d_model)
@@ -27,7 +27,7 @@ class DecoderLayer(nn.Module):
         # self.norm_cross1 = nn.BatchNorm1d(item_seq_len)
         self.norm_cross1_enc = nn.LayerNorm(d_model)
         # self.norm_cross1_enc = nn.BatchNorm1d(user_seq_len)
-        self.cross_attention1 = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
+        self.cross_attention1 = MultiHeadAttention(d_model=d_model, num_heads=num_heads, dropout=dropout)
         self.dropout_cross1 = nn.Dropout(p=dropout)
         # Cross Attention(1) - moe
         self.norm_cross1_moe = nn.LayerNorm(d_model)
@@ -47,9 +47,9 @@ class DecoderLayer(nn.Module):
         # 2-1. Cross Attention(1) : [anchor items - anchor user] 간의 attention
         residual = x
         x = self.norm_cross1(x)
-        # enc_output = self.norm_cross1_enc(enc_output)[:,0,:].unsqueeze(1) # anchor user에 대한 representation만
-        enc_output = self.norm_cross1_enc(enc_output)
-        x, attention = self.cross_attention1(Q=x, K=enc_output, V=enc_output, mask=item_user_mask) # bs x 1 x d
+        # enc_output은 다음 레이어에도 원본 그대로 전달되어야 하므로, 정규화는 지역 변수에만 적용
+        enc_output_normed = self.norm_cross1_enc(enc_output)
+        x, attention = self.cross_attention1(Q=x, K=enc_output_normed, V=enc_output_normed, mask=item_user_mask) # bs x 1 x d
         x = self.dropout_cross1(x)
         x = x + residual 
         

@@ -8,11 +8,10 @@ class ScaledDotProductAttention(nn.Module):
     """
     Perform scaled dot product attention
     """
-    def __init__(self, is_enc=False):
+    def __init__(self, dropout=0.0):
         super(ScaledDotProductAttention, self).__init__()
-        if is_enc:
-            self.spd_param = nn.Parameter(torch.randn((30, 30), dtype=torch.float, requires_grad=True))
-    
+        self.dropout = nn.Dropout(p=dropout)
+
     def forward(self, Q, K, V, mask=None):
         # Input is 4-d tensor
         d_tensor = K.size(-1)
@@ -21,32 +20,29 @@ class ScaledDotProductAttention(nn.Module):
             # d_tensor = d_model // num_head
             # [batch_size, num_heads, seq_length, d_tensor] ==> [batch_size, num_heads, d_tensor, seq_length]
         K_T = K.transpose(2, 3)
-        attention = torch.matmul(Q, K_T) / math.sqrt(d_tensor)
+        scores = torch.matmul(Q, K_T) / math.sqrt(d_tensor)
 
         # 2. Apply attention mask
         if mask is not None:
-            attention_map = attention.masked_fill(mask == 0, -10000) # mask의 값이 0인 위치에 해당하는 attention score값을 -10000으로 변경
-        
-        # if last_layer_flag:
-        #     rating_pred = torch.mean(attention_map, dim=1)
+            scores = scores.masked_fill(mask == 0, -10000) # mask의 값이 0인 위치에 해당하는 attention score값을 -10000으로 변경
 
         # 3. Pass score to softmax for making [0, 1] range.
-        attention_map = torch.softmax(attention_map, dim=-1)
+        attention_map = torch.softmax(scores, dim=-1)
 
-        # 4. Dot product with V
-        V = torch.matmul(attention_map, V)
-        
-        return V, attention
+        # 4. Dot product with V (dropout은 V 계산에만 적용, 반환하는 attention_map은 순수 확률값 유지)
+        V = torch.matmul(self.dropout(attention_map), V)
+
+        return V, attention_map
 
 class MultiHeadAttention(nn.Module):
     """
     Perform multi-head attention
     """
-    def __init__(self, d_model, num_heads, last_layer_flag=False):
+    def __init__(self, d_model, num_heads, dropout=0.0, last_layer_flag=False):
         super(MultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
-        self.attention = ScaledDotProductAttention()
+        self.attention = ScaledDotProductAttention(dropout=dropout)
         self.last_layer_flag = last_layer_flag
 
         # Input projection
